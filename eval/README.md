@@ -18,15 +18,13 @@ python3 eval/run-ragas-eval.py \
   --output target/ragas-report.json
 ```
 
-Local Ollama judge:
+Optional local Ollama judge (choose your own installed model; the main app uses DeepSeek API):
 
 ```bash
-/Applications/Ollama.app/Contents/Resources/ollama pull nomic-embed-text
-
 python3 eval/run-ragas-eval.py \
   --provider ollama \
-  --judge-model qwen2.5:7b \
-  --embedding-model nomic-embed-text \
+  --judge-model YOUR_LOCAL_CHAT_MODEL \
+  --embedding-model YOUR_LOCAL_EMBEDDING_MODEL \
   --input target/rag-eval-report.json \
   --output target/ragas-report.json
 ```
@@ -36,8 +34,8 @@ For slower local models, reduce concurrency:
 ```bash
 python3 eval/run-ragas-eval.py \
   --provider ollama \
-  --judge-model qwen2.5:7b \
-  --embedding-model nomic-embed-text \
+  --judge-model YOUR_LOCAL_CHAT_MODEL \
+  --embedding-model YOUR_LOCAL_EMBEDDING_MODEL \
   --max-workers 1 \
   --batch-size 1
 ```

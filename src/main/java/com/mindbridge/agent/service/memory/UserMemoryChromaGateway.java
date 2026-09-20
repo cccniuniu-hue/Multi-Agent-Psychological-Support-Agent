@@ -38,19 +38,19 @@ public class UserMemoryChromaGateway {
         this.embeddingClient = embeddingClient;
     }
 
-    public void mirror(UserMemoryItem item) {
+    public boolean mirror(UserMemoryItem item) {
         if (!properties.getMemory().isUseChroma() || item.getId() == null) {
-            return;
+            return false;
         }
         String text = document(item);
         List<Double> embedding = safeEmbedding(text);
         String model = embeddingClient.modelName();
         if (embedding == null || embedding.isEmpty() || model == null || model.isBlank()) {
-            return;
+            return false;
         }
         String ensuredCollectionId = ensureCollection();
         if (ensuredCollectionId == null) {
-            return;
+            return false;
         }
         Map<String, Object> body = Map.of(
                 "ids", List.of(chromaId(item.getId())),
@@ -58,16 +58,20 @@ public class UserMemoryChromaGateway {
                 "embeddings", List.of(embedding),
                 "metadatas", List.of(metadata(item, model, embedding.size()))
         );
-        webClient.post()
-                .uri(COLLECTIONS_PATH + "/{collectionId}/upsert",
-                        properties.getMemory().getChromaTenant(),
-                        properties.getMemory().getChromaDatabase(),
-                        ensuredCollectionId)
-                .bodyValue(body)
-                .retrieve()
-                .toBodilessEntity()
-                .onErrorComplete()
-                .block();
+        try {
+            webClient.post()
+                    .uri(COLLECTIONS_PATH + "/{collectionId}/upsert",
+                            properties.getMemory().getChromaTenant(),
+                            properties.getMemory().getChromaDatabase(),
+                            ensuredCollectionId)
+                    .bodyValue(body)
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     public List<UserMemoryMatch> query(Long userId, String text, int topK) {

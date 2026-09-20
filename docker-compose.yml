@@ -15,9 +15,11 @@ services:
       DB_PASSWORD: mindbridge
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      AI_PROVIDER: ${AI_PROVIDER:-ollama}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      AI_PROVIDER: ${AI_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       USE_CHROMA: ${USE_CHROMA:-true}
       OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-512}
       CHROMA_BASE_URL: http://chroma:8000
@@ -36,8 +38,6 @@ services:
       MCP_EMAIL_MODE: ${MCP_EMAIL_MODE:-log}
       MAIL_HOST: mailpit
       MAIL_PORT: 1025
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     volumes:

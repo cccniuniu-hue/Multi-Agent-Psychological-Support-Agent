@@ -5,7 +5,7 @@ const state = {
   },
   sessionId: null,
   sending: false,
-  modelName: "qwen2.5:7b",
+  modelName: "deepseek-flash",
   isAdmin: false
 };
 
@@ -303,10 +303,7 @@ function actionLabel(action) {
 }
 
 function displayModelName(model) {
-  if ((model || "").toLowerCase().includes("mindbridge-qwen2.5-7b-ft")) {
-    return "微调后的 Qwen2.5-7B";
-  }
-  return model || "Qwen2.5-7B";
+  return model || "deepseek-flash";
 }
 
 function assistantName() {

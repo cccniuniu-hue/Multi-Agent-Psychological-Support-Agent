@@ -170,7 +170,9 @@ def build_models(args: argparse.Namespace) -> tuple[Any, Any]:
     else:
         from langchain_ollama import ChatOllama, OllamaEmbeddings
 
-        judge_model = args.judge_model or os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+        judge_model = args.judge_model or os.getenv("OLLAMA_MODEL")
+        if not judge_model:
+            raise SystemExit("Set --judge-model or OLLAMA_MODEL for the optional Ollama evaluator.")
         embedding_model = args.embedding_model or "nomic-embed-text"
         llm = ChatOllama(model=judge_model, base_url=args.ollama_base_url, temperature=0)
         embeddings = OllamaEmbeddings(model=embedding_model, base_url=args.ollama_base_url)

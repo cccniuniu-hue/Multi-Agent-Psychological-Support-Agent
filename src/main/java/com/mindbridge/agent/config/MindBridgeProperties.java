@@ -50,14 +50,14 @@ public class MindBridgeProperties {
     }
 
     public static class Ai {
-        /** 模型提供方：ollama 或 openai。 */
-        private String provider = "ollama";
+        /** 聊天模型提供方：deepseek 或 openai。 */
+        private String provider = "deepseek";
         /** 生成温度，值越高回答越发散。 */
         private double temperature = 0.35;
-        /** 学生端单次回复的最大生成 token 数，避免本地模型无边界扩写。 */
+        /** 学生端单次回复的最大生成 token 数。 */
         private int maxTokens = 512;
-        private final Ollama ollama = new Ollama();
-        private final OpenAi openai = new OpenAi();
+        private final ChatApi deepseek = new ChatApi("https://api.deepseek.com", "deepseek-flash");
+        private final ChatApi openai = new ChatApi("https://api.openai.com", "gpt-4o-mini");
 
         public String getProvider() {
             return provider;
@@ -83,45 +83,25 @@ public class MindBridgeProperties {
             this.maxTokens = maxTokens;
         }
 
-        public Ollama getOllama() {
-            return ollama;
+        public ChatApi getDeepseek() {
+            return deepseek;
         }
 
-        public OpenAi getOpenai() {
+        public ChatApi getOpenai() {
             return openai;
         }
     }
 
-    public static class Ollama {
-        /** 本地模型服务地址。 */
-        private String baseUrl = "http://localhost:11434";
-        /** MindBridge 项目模型名称。 */
-        private String model = "qwen2.5:7b";
+    public static class ChatApi {
+        /** OpenAI 兼容聊天接口地址。 */
+        private String baseUrl;
+        private String apiKey = "";
+        private String model;
 
-        public String getBaseUrl() {
-            return baseUrl;
-        }
-
-        public void setBaseUrl(String baseUrl) {
+        public ChatApi(String baseUrl, String model) {
             this.baseUrl = baseUrl;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
             this.model = model;
         }
-    }
-
-    public static class OpenAi {
-        /** OpenAI 兼容接口地址。 */
-        private String baseUrl = "https://api.openai.com";
-        /** OpenAI API Key，未配置时不能启用 openai provider。 */
-        private String apiKey = "";
-        /** OpenAI 聊天模型名称。 */
-        private String model = "gpt-4o-mini";
 
         public String getBaseUrl() {
             return baseUrl;

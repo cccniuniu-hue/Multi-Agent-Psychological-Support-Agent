@@ -7,11 +7,11 @@
 - 后台心理状态识别：记录情绪标签、情绪分数、风险等级和置信度，但学生端不展示评估结果。
 - 用户画像记忆：从对话中抽取稳定偏好、沟通方式和支持需求，MySQL 保存可审计记录；显式开启画像向量化后可用 Chroma 语义召回。
 - 数据闭环：咨询/风险消息写入数据库，高风险先写 Excel，再触发邮件或 HTTP MCP 预警。
-- Spring AI 模型接入：默认通过 `ollama` 调用项目模型，也可按需切到 `openai`。
+- Spring AI 模型接入：默认通过 DeepSeek API 提供聊天与生成能力，也可按需切到 `openai`。
 - 可替换知识库：默认本地轻量检索，可打开 Chroma 镜像和查询。
 - 多 Agent loop：每轮输入由 MemoryAgent、SupervisorAgent、KnowledgeAgent、RiskGuardianAgent 和回复 Agent 协作完成
 
-项目默认直接使用官方 Ollama 模型 `qwen2.5:7b`。
+默认聊天模型为 DeepSeek API 的 `deepseek-flash`。知识库和用户画像的 Embedding 服务独立配置；DeepSeek API Key 不会自动用作向量化密钥。
 
 ## 目录
 
@@ -62,7 +62,7 @@ MemoryAgent
 | --- | --- | --- |
 | JDK | 17 | 本地构建或运行 Jar 时必需 |
 | Maven | 3.9+ | 本地构建时必需 |
-| Ollama | 运行本地大模型 | 使用 `AI_PROVIDER=ollama` 时必需 |
+| DeepSeek API Key | 外接聊天模型 | 默认聊天模式必需 |
 | Docker / Docker Compose | 启动 MySQL、Redis、Chroma 和 Mailpit | 仅容器部署时必需 |
 
 先进入项目根目录：
@@ -76,7 +76,6 @@ cd /path/to/MindBridge
 ```bash
 java -version
 mvn -version
-ollama --version
 docker compose version
 ```
 
@@ -84,41 +83,31 @@ docker compose version
 
 ### 2. 本地快速运行（适合开发与演示）
 
-默认模型名为 `qwen2.5:7b`。首次使用前拉取官方模型：
+先从 DeepSeek 平台获取 API Key，并在当前终端设置环境变量：
 
 ```bash
-ollama pull qwen2.5:7b
+export DEEPSEEK_API_KEY='你的_API_Key'
 ```
 
-然后启动项目：
+然后启动项目（PowerShell 可先执行 `$env:DEEPSEEK_API_KEY='你的_API_Key'`）：
 
 ```bash
 ./scripts/run-dev.sh
 ```
 
-`run-dev.sh` 会检查并启动 Ollama，然后通过 Maven 启动 Spring Boot。如果希望使用已安装的其他 Ollama 模型，可在启动时覆盖模型名：
+`run-dev.sh` 不再安装或启动本地大模型，只通过 Maven 启动 Spring Boot。需要选择其他 DeepSeek 模型时可设置：
 
 ```bash
-OLLAMA_MODEL=qwen2.5:7b ./scripts/run-dev.sh
+DEEPSEEK_MODEL=deepseek-v4-pro ./scripts/run-dev.sh
 ```
 
-也可以手动分两个终端启动：
-
-```bash
-# 终端 1
-./scripts/start-ollama.sh
-```
-
-```bash
-# 终端 2
-mvn -Dmaven.repo.local=.m2/repository spring-boot:run
-```
+也可以直接执行 `mvn -Dmaven.repo.local=.m2/repository spring-boot:run`。
 
 这种模式默认使用：
 
 - `./data/mindbridge.mv.db` H2 文件数据库；
 - `./data/mindbridge-reports.xlsx` 高风险报告文件；
-- Ollama 本地模型；
+- DeepSeek 远程聊天模型；
 - 日志模式预警（不真正发送邮件）。
 
 ### 3. 打包并运行 Jar（适合服务器部署）
@@ -132,9 +121,7 @@ mvn -Dmaven.repo.local=.m2/repository clean package
 本机启动：
 
 ```bash
-AI_PROVIDER=ollama \
-OLLAMA_BASE_URL=http://127.0.0.1:11434 \
-OLLAMA_MODEL=qwen2.5:7b \
+DEEPSEEK_API_KEY=你的_API_Key \
 java -jar target/mindbridge-agent-0.1.0.jar \
   --server.address=127.0.0.1 \
   --server.port=8080
@@ -154,18 +141,7 @@ Compose 会启动以下服务：
 | Chroma | `8000` | 知识库和用户画像向量检索 |
 | Mailpit | `1025` / `8025` | SMTP 测试服务 / 管理页面 |
 
-Docker 中的 MindBridge 默认访问宿主机 `11434` 端口上的 Ollama，因此需先确保 Ollama 和模型已就绪：
-
-```bash
-ollama list
-curl http://localhost:11434/api/tags
-```
-
-如果 Ollama 只监听 `127.0.0.1`，容器将无法访问它。使用 Ollama CLI 时可改为监听所有网卡（并应通过防火墙限制只允许本机/容器网络访问）：
-
-```bash
-OLLAMA_HOST=0.0.0.0:11434 ollama serve
-```
+Docker Compose 会将 `DEEPSEEK_API_KEY` 注入应用容器。可复制 `.env.example` 为 `.env`，填入真实密钥；`.env` 已被 Git 忽略。对话内容会发往外部 DeepSeek 服务，处理真实心理咨询数据前应明确告知使用者并确认数据处理安排。
 
 为避免首次启动时 MySQL 尚未就绪，建议先启动依赖，再构建应用容器：
 
@@ -196,9 +172,10 @@ docker compose down
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `SERVER_PORT` | `8080` | 应用端口 |
-| `AI_PROVIDER` | `ollama` | `ollama` 或 `openai` |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 地址 |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | Ollama 模型名 |
+| `AI_PROVIDER` | `deepseek` | `deepseek` 或 `openai` |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek 聊天密钥，默认模式必需 |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | DeepSeek OpenAI 兼容接口地址 |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | DeepSeek 聊天模型名 |
 | `OPENAI_API_KEY` | 空 | OpenAI 密钥 |
 | `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI 模型名 |
 | `OPENAI_EMBEDDING_MODEL` / `OPENAI_EMBEDDING_DIMENSIONS` | `text-embedding-3-small` / `512` | 知识库 Embedding 模型与输出维度 |
@@ -226,7 +203,7 @@ http://localhost:8080
 curl http://localhost:8080/actuator/health
 ```
 
-预期返回包含 `"status":"UP"` 的 JSON。页面左上角会显示当前模型模式；如果 Ollama 未启动、模型未导入或地址配置错误，聊天接口会提示模型连接失败。
+预期返回包含 `"status":"UP"` 的 JSON。页面左上角会显示当前模型模式；如果 DeepSeek Key 无效或接口不可达，聊天接口会提示模型连接失败。
 
 首次启动会创建两个演示账号：
 
@@ -239,10 +216,10 @@ student / student123
 
 ### 7. 常见问题
 
-- `Connection refused: 11434`：Ollama 未启动，先执行 `./scripts/start-ollama.sh` 或 `ollama serve`。
-- `model not found`：执行 `ollama list` 确认模型名，并检查 `OLLAMA_MODEL` 是否一致。
+- 启动时报 `DEEPSEEK_API_KEY` 缺失：在终端或未提交的 `.env` 中设置密钥。
+- DeepSeek 返回 401 或模型错误：核对 API Key、账户状态和 `DEEPSEEK_MODEL`。
 - `Address already in use`：8080 端口被占用，可使用 `SERVER_PORT=8090 ./scripts/run-dev.sh` 更换端口。
-- Docker 中无法连接 Ollama：确认宿主机 Ollama 允许容器访问，并检查 Compose 中的 `OLLAMA_BASE_URL=http://host.docker.internal:11434`。
+- Docker 中无法访问 DeepSeek：检查容器出站网络以及 `DEEPSEEK_BASE_URL`。
 - MySQL 或 Chroma 启动较慢：先用 `docker compose ps` 检查依赖服务，再用 `docker compose restart app` 重启应用。
 
 ## 调用示例
@@ -292,40 +269,11 @@ curl -u admin:admin123 \
   http://localhost:8080/api/admin/knowledge
 ```
 
-## 接入 Ollama 模型
+## 接入 DeepSeek API
 
-默认模型配置就是本地 Ollama 路线，模型名为：
+设置 `DEEPSEEK_API_KEY` 后直接运行 `./scripts/run-dev.sh`；聊天与流式输出共用 `deepseek-flash`。项目沿用 Spring AI 的 OpenAI 兼容客户端，并默认指定非思考模式，以适配当前单次回复的 token 上限。可通过 `DEEPSEEK_MODEL` 切换 DeepSeek 支持的模型；无需下载 Qwen 或启动 Ollama。
 
-```text
-qwen2.5:7b
-```
-
-首次使用前拉取官方模型：
-
-```bash
-cd MindBridge
-ollama pull qwen2.5:7b
-```
-
-然后直接启动项目：
-
-```bash
-cd MindBridge
-./scripts/run-dev.sh
-```
-
-如果终端提示 `ollama: command not found`，说明只是命令链接没建好；本项目脚本会直接调用 `/Applications/Ollama.app/Contents/Resources/ollama`。
-
-也可以不用脚本，手动指定本地模型启动：
-
-```bash
-cd MindBridge
-AI_PROVIDER=ollama \
-OLLAMA_BASE_URL=http://localhost:11434 \
-OLLAMA_MODEL=qwen2.5:7b \
-JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
-  .tools/apache-maven-3.9.9/bin/mvn -Dmaven.repo.local=.m2/repository spring-boot:run
-```
+DeepSeek 这里只提供聊天能力。知识库 Embedding 仍由 `OPENAI_API_KEY`、`OPENAI_EMBEDDING_MODEL` 等参数独立控制；未设置时使用本地关键词检索。用户画像 Embedding 默认关闭，只有显式配置专用密钥时才会发送画像文本。
 
 ## 接入 OpenAI
 
@@ -349,7 +297,7 @@ docker compose up -d mysql redis chroma mailpit
 使用 MySQL profile：
 
 ```bash
-AI_PROVIDER=ollama \
+DEEPSEEK_API_KEY=你的_API_Key \
 USE_CHROMA=true \
 MEMORY_USE_CHROMA=true \
 MCP_EMAIL_MODE=smtp \
@@ -363,6 +311,18 @@ mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 - `mindbridge_user_memory`：用户画像/偏好长期语义记忆召回；默认关闭画像向量化，改用关系库最近记忆召回。显式开启需设置 `MEMORY_EMBEDDING_ENABLED=true` 和独立的 `MEMORY_EMBEDDING_API_KEY`，画像文本随后会发送到所配置的 Embedding 服务及 Chroma。
 
 Mailpit 管理页面：`http://localhost:8025`
+
+## 重建 Chroma 索引
+
+知识库切块和用户画像仍以关系库为主数据。以下命令只用稳定 ID 向 Chroma 重放向量，不删除或改写关系库记录；失败时命令报错，可直接重试。Chroma 不可用时，在线检索沿用已有的数据库降级路径。
+
+```bash
+docker compose run --rm --no-deps app \
+  --spring.main.web-application-type=none \
+  --rebuild-index=all
+```
+
+先确保 MySQL、Redis、Chroma 已启动，且 `.env` 配有 `DEEPSEEK_API_KEY`。可将 `all` 换成 `knowledge` 或 `memory`。知识库只重放数据库中已有且维度匹配的向量，缺失向量会计入 `knowledgeSkipped`；画像索引只有同时设置 `MEMORY_USE_CHROMA=true`、`MEMORY_EMBEDDING_ENABLED=true` 和专用 `MEMORY_EMBEDDING_API_KEY` 才会重建。`all` 遇到画像向量化关闭会跳过画像，显式指定 `memory` 时会报错。该命令使用 upsert 修复/恢复索引，不清理 Chroma 中已无对应关系库记录的旧条目。
 
 ## MCP 工具模式
 
@@ -403,9 +363,7 @@ Java 输入报告包含每条样本的：
 
 ```bash
 SPRING_MAIN_WEB_APPLICATION_TYPE=none \
-AI_PROVIDER=ollama \
-OLLAMA_BASE_URL=http://localhost:11434 \
-OLLAMA_MODEL=qwen2.5:7b \
+DEEPSEEK_API_KEY=你的_API_Key \
 USE_CHROMA=false \
 RAG_EVAL_ENABLED=true \
 RAG_EVAL_EXIT_AFTER_RUN=true \
@@ -452,17 +410,6 @@ python3 eval/run-ragas-eval.py \
   --output target/ragas-report.json
 ```
 
-使用本地 Ollama 评审模型：
-
-```bash
-/Applications/Ollama.app/Contents/Resources/ollama pull nomic-embed-text
-
-python3 eval/run-ragas-eval.py \
-  --provider ollama \
-  --judge-model qwen2.5:7b \
-  --embedding-model nomic-embed-text \
-  --input target/rag-eval-report.json \
-  --output target/ragas-report.json
-```
+`eval/` 中的评审模型与主应用聊天模型独立配置；详见 `eval/README.md`。
 
 RAGAS 输出报告：`target/ragas-report.json`

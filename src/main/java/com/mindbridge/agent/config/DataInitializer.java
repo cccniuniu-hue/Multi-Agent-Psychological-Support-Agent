@@ -31,6 +31,9 @@ public class DataInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        if (args.containsOption("rebuild-index")) {
+            return;
+        }
         // 首次启动准备演示账号；内置知识库会按 source 补齐或刷新。
         seedUsers();
         knowledgeIngestionService.syncClasspathKnowledge();

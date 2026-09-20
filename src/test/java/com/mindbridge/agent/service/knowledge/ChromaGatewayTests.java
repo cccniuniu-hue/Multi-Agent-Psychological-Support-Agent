@@ -27,6 +27,7 @@ class ChromaGatewayTests {
     private final List<CapturedRequest> requests = new CopyOnWriteArrayList<>();
     private HttpServer server;
     private ChromaGateway gateway;
+    private boolean failUpsert;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -57,7 +58,7 @@ class ChromaGatewayTests {
         chunk.setEmbeddingDimensions(3);
         List<Double> embedding = List.of(0.1, 0.2, 0.3);
 
-        gateway.mirror(chunk, embedding);
+        assertThat(gateway.mirror(chunk, embedding)).isTrue();
         List<SearchResult> results = gateway.query(embedding, "text-embedding-test", 5);
         gateway.deleteSource("guide.md");
 
@@ -106,16 +107,36 @@ class ChromaGatewayTests {
     void skipsChromaRequestsWhenEmbeddingIsUnavailable() {
         KnowledgeChunk chunk = new KnowledgeChunk();
 
-        gateway.mirror(chunk, List.of());
+        assertThat(gateway.mirror(chunk, List.of())).isFalse();
         assertThat(gateway.query(List.of(), "text-embedding-test", 5)).isEmpty();
 
         assertThat(requests).isEmpty();
+    }
+
+    @Test
+    void reportsUpsertFailureForRetryWithoutDeletingExistingIndex() {
+        failUpsert = true;
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        ReflectionTestUtils.setField(chunk, "id", 42L);
+        chunk.setSource("guide.md");
+        chunk.setContent("支持性倾听");
+        chunk.setEmbeddingModel("text-embedding-test");
+        chunk.setEmbeddingDimensions(3);
+
+        assertThat(gateway.mirror(chunk, List.of(0.1, 0.2, 0.3))).isFalse();
+        assertThat(requests).extracting(CapturedRequest::path).noneMatch(path -> path.endsWith("/delete"));
     }
 
     private void handleRequest(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
         String requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         requests.add(new CapturedRequest(exchange.getRequestMethod(), path, requestBody));
+
+        if (failUpsert && path.endsWith("/upsert")) {
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+            return;
+        }
 
         String responseBody;
         if (path.endsWith("/collections")) {

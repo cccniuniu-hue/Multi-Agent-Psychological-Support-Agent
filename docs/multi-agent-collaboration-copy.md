@@ -254,7 +254,7 @@ MindBridge 把 Agent 协作过程保存为运行轨迹。`AgentRunTraceService.s
 
 ### 与模型的关系：多个 Agent 不等于多个模型
 
-本项目里的多个 Agent 可以共享同一个大模型客户端。默认配置使用 Ollama，模型名是 `mindbridge-qwen2.5-7b-ft:latest`；也可以通过配置切换到 OpenAI 兼容接口。项目内部通过 `AiClient` 抽象模型调用，`SpringAiChatClient` 再把内部的 `AiMessage` 转成 Spring AI 的 `SystemMessage`、`UserMessage` 和 `AssistantMessage`。
+本项目里的多个 Agent 可以共享同一个大模型客户端。默认配置使用 DeepSeek API 的 `deepseek-flash`，也可以通过配置切换到其他 OpenAI 兼容接口。项目内部通过 `AiClient` 抽象模型调用，`SpringAiChatClient` 再把内部的 `AiMessage` 转成 Spring AI 的 `SystemMessage`、`UserMessage` 和 `AssistantMessage`。
 
 所以，多 Agent 的差异主要来自职责、上下文和 prompt，而不是一定要部署多个模型。
 
@@ -278,7 +278,7 @@ MindBridge 对学生端和后台做了明显区分。学生端不会看到风险
 
 不过，新增 Agent 不应该变成随意堆叠。MindBridge 当前架构的好处在于职责边界清楚。一个新 Agent 应该满足两个条件：它有独立的状态输入和输出，它能减少某个现有 Agent 的复杂度。否则，把逻辑放进已有服务或 prompt 模板里可能更合适。
 
-配置层也比较容易扩展。`MindBridgeProperties` 集中管理模型 provider、温度、token 上限、RAG topK、reranker、chunk size、Chroma、Redis 记忆、Excel 写入和预警方式。部署时可以选择 H2 或 MySQL，可以启用或关闭 Chroma，可以用本地 Ollama，也可以切到 OpenAI 兼容接口。
+配置层也比较容易扩展。`MindBridgeProperties` 集中管理模型 provider、温度、token 上限、RAG topK、reranker、chunk size、Chroma、Redis 记忆、Excel 写入和预警方式。部署时可以选择 H2 或 MySQL，可以启用或关闭 Chroma，默认聊天走 DeepSeek API，也可以切到其他 OpenAI 兼容接口。
 
 ### 测试如何证明协作路径正确
 

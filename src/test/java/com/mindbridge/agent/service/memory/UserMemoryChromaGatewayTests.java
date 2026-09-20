@@ -31,6 +31,7 @@ class UserMemoryChromaGatewayTests {
     private HttpServer server;
     private UserMemoryChromaGateway gateway;
     private MindBridgeProperties properties;
+    private boolean failUpsert;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -62,7 +63,7 @@ class UserMemoryChromaGatewayTests {
         item.setSummary("考试前需要先梳理任务优先级");
         item.setEvidence("最近两次备考时都这样更安心");
 
-        gateway.mirror(item);
+        assertThat(gateway.mirror(item)).isTrue();
         List<UserMemoryMatch> matches = gateway.query(7L, "最近复习压力很大", 4);
         gateway.delete(23L);
 
@@ -116,7 +117,7 @@ class UserMemoryChromaGatewayTests {
         gateway = new UserMemoryChromaGateway(properties, WebClient.builder(),
                 new ConfiguredMemoryEmbeddingClient(properties, WebClient.builder()));
 
-        gateway.mirror(item);
+        assertThat(gateway.mirror(item)).isFalse();
         assertThat(gateway.query(7L, "敏感查询", 4)).isEmpty();
         assertThat(requests).isEmpty();
     }
@@ -142,15 +143,35 @@ class UserMemoryChromaGatewayTests {
             }
         });
 
-        gateway.mirror(item);
+        assertThat(gateway.mirror(item)).isFalse();
         assertThat(gateway.query(7L, "画像查询", 4)).isEmpty();
         assertThat(requests).isEmpty();
+    }
+
+    @Test
+    void reportsUpsertFailureSoRebuildCanStop() {
+        failUpsert = true;
+        UserAccount user = new UserAccount();
+        ReflectionTestUtils.setField(user, "id", 7L);
+        UserMemoryItem item = new UserMemoryItem();
+        ReflectionTestUtils.setField(item, "id", 23L);
+        item.setUser(user);
+        item.setSummary("需要支持");
+
+        assertThat(gateway.mirror(item)).isFalse();
+        assertThat(requests).extracting(CapturedRequest::path).noneMatch(path -> path.endsWith("/delete"));
     }
 
     private void handleRequest(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
         String requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         requests.add(new CapturedRequest(exchange.getRequestMethod(), path, requestBody));
+
+        if (failUpsert && path.endsWith("/upsert")) {
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+            return;
+        }
 
         String responseBody;
         if (path.endsWith("/collections")) {

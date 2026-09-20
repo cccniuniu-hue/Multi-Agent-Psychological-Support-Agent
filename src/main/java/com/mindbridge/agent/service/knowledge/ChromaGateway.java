@@ -29,7 +29,7 @@ public class ChromaGateway {
         this.webClient = webClientBuilder.baseUrl(properties.getKnowledge().getChromaBaseUrl()).build();
     }
 
-    public void mirror(KnowledgeChunk chunk, List<Double> embedding) {
+    public boolean mirror(KnowledgeChunk chunk, List<Double> embedding) {
         if (!properties.getKnowledge().isUseChroma()
                 || embedding == null
                 || embedding.isEmpty()
@@ -37,12 +37,12 @@ public class ChromaGateway {
                 || chunk.getEmbeddingModel().isBlank()
                 || chunk.getEmbeddingDimensions() == null
                 || chunk.getEmbeddingDimensions() != embedding.size()) {
-            return;
+            return false;
         }
         // 本地数据库仍是主存储；Chroma 只是可选检索加速层。
         String ensuredCollectionId = ensureCollection();
         if (ensuredCollectionId == null) {
-            return;
+            return false;
         }
         Map<String, Object> body = Map.of(
                 "ids", List.of(String.valueOf(chunk.getId())),
@@ -54,16 +54,21 @@ public class ChromaGateway {
                         "embeddingModel", chunk.getEmbeddingModel(),
                         "embeddingDimensions", chunk.getEmbeddingDimensions()))
         );
-        webClient.post()
-                .uri(COLLECTIONS_PATH + "/{collectionId}/upsert",
-                        properties.getKnowledge().getChromaTenant(),
-                        properties.getKnowledge().getChromaDatabase(),
-                        ensuredCollectionId)
-                .bodyValue(body)
-                .retrieve()
-                .toBodilessEntity()
-                .onErrorComplete()
-                .block();
+        try {
+            webClient.post()
+                    .uri(COLLECTIONS_PATH + "/{collectionId}/upsert",
+                            properties.getKnowledge().getChromaTenant(),
+                            properties.getKnowledge().getChromaDatabase(),
+                            ensuredCollectionId)
+                    .bodyValue(body)
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+            return true;
+        } catch (Exception ignored) {
+            // 日常入库仍可回退到数据库；重建命令通过返回值报告失败。
+            return false;
+        }
     }
 
     public List<SearchResult> query(List<Double> embedding, String embeddingModel, int topK) {

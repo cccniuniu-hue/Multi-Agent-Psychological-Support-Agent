@@ -57,7 +57,7 @@ flowchart LR
 | 层级 | 技术 | 在 RAG 中的作用 |
 | --- | --- | --- |
 | 后端框架 | Java 17、Spring Boot 3.3.5 | 提供服务启动、配置绑定、依赖注入、事务和 REST 接口 |
-| 模型接入 | Spring AI 1.0.0、Ollama、OpenAI 兼容接口 | 接入本地 Qwen/Ollama 生成模型，也可切换 OpenAI provider |
+| 模型接入 | Spring AI 1.0.0、OpenAI 兼容接口 | 默认接入 DeepSeek API 生成模型，也可切换 OpenAI provider |
 | 流式输出 | Spring WebFlux、Reactor、SSE | 将最终模型回答以 token 流返回前端 |
 | 主存储 | H2、MySQL、Spring Data JPA | 保存知识切块、embeddingJson、embedding 版本、会话、报告和 Agent trace |
 | 短期记忆 | Redis、Spring Data Redis | 保存最近对话，辅助 MemoryAgent 准备上下文 |
@@ -750,7 +750,7 @@ Chroma 查询同时过滤当前账号的 `userId`、画像 embedding 模型和�
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | embedding 模型 |
 | `OPENAI_EMBEDDING_DIMENSIONS` | `512` | 请求和校验的 embedding 输出维度 |
 
-注意：`OPENAI_API_KEY` 同时也会影响 OpenAI 聊天 provider。如果项目使用 Ollama 生成模型，但想用 OpenAI embedding，也可以保持 `AI_PROVIDER=ollama`，同时设置 `OPENAI_API_KEY`。
+注意：默认聊天使用 `DEEPSEEK_API_KEY`；`OPENAI_API_KEY` 单独控制知识库 embedding。只有显式设置 `AI_PROVIDER=openai` 时，`OPENAI_API_KEY` 才同时用于聊天。
 
 ### 16.3 用户画像召回
 
@@ -785,7 +785,7 @@ Chroma 查询同时过滤当前账号的 `userId`、画像 embedding 模型和�
 默认情况下：
 
 - 数据库：H2 文件库 `./data/mindbridge`
-- 生成模型：Ollama，模型 `mindbridge-qwen2.5-7b-ft:latest`
+- 生成模型：DeepSeek API，默认模型 `deepseek-flash`
 - Chroma：默认启用，但服务不可用时会降级
 - Embedding：未设置 `OPENAI_API_KEY` 时不启用本地 embedding
 
@@ -800,7 +800,7 @@ docker compose up -d mysql redis chroma mailpit
 使用 MySQL profile 时：
 
 ```bash
-AI_PROVIDER=ollama \
+DEEPSEEK_API_KEY=你的_API_Key \
 USE_CHROMA=true \
 MEMORY_USE_CHROMA=true \
 mvn spring-boot:run -Dspring-boot.run.profiles=mysql
@@ -849,9 +849,7 @@ src/main/resources/rag-eval/mindbridge-rag-eval.json
 
 ```bash
 SPRING_MAIN_WEB_APPLICATION_TYPE=none \
-AI_PROVIDER=ollama \
-OLLAMA_BASE_URL=http://localhost:11434 \
-OLLAMA_MODEL=mindbridge-qwen2.5-7b-ft:latest \
+DEEPSEEK_API_KEY=你的_API_Key \
 USE_CHROMA=false \
 RAG_EVAL_ENABLED=true \
 RAG_EVAL_EXIT_AFTER_RUN=true \
@@ -884,15 +882,13 @@ python3 eval/run-ragas-eval.py \
   --output target/ragas-report.json
 ```
 
-本地 Ollama 评审模型：
+可选本地 Ollama 评审模型（需自行指定已安装的聊天与向量模型，主应用仍使用 DeepSeek）：
 
 ```bash
-/Applications/Ollama.app/Contents/Resources/ollama pull nomic-embed-text
-
 python3 eval/run-ragas-eval.py \
   --provider ollama \
-  --judge-model qwen2.5:7b \
-  --embedding-model nomic-embed-text \
+  --judge-model YOUR_LOCAL_CHAT_MODEL \
+  --embedding-model YOUR_LOCAL_EMBEDDING_MODEL \
   --input target/rag-eval-report.json \
   --output target/ragas-report.json
 ```

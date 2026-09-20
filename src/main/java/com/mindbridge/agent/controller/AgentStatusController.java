@@ -25,7 +25,7 @@ public class AgentStatusController {
     public AgentStatusResponse status() {
         // realModelEnabled 只表示当前使用真实模型客户端，不代表业务评估一定会展示给学生。
         String provider = properties.getAi().getProvider().toLowerCase(Locale.ROOT);
-        boolean realModelEnabled = "ollama".equals(provider) || "openai".equals(provider);
+        boolean realModelEnabled = "deepseek".equals(provider) || "openai".equals(provider);
         return new AgentStatusResponse(
                 provider,
                 modelName(provider),
@@ -41,8 +41,8 @@ public class AgentStatusController {
     }
 
     private String modelName(String provider) {
-        if ("ollama".equals(provider)) {
-            return properties.getAi().getOllama().getModel();
+        if ("deepseek".equals(provider)) {
+            return properties.getAi().getDeepseek().getModel();
         }
         if ("openai".equals(provider)) {
             return properties.getAi().getOpenai().getModel();
