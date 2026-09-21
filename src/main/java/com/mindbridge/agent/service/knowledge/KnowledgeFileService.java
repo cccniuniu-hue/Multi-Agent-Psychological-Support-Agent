@@ -1,7 +1,11 @@
 package com.mindbridge.agent.service.knowledge;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -24,7 +28,18 @@ public class KnowledgeFileService {
     }
 
     public int ingest(String filename, byte[] bytes) {
-        // 文件上传入口只负责校验和抽取文本，真正切块、向量化、落库交给 KnowledgeService。
+        DocumentParseResult result = parse(filename, bytes);
+        if (result.status() == DocumentParseResult.Status.FAILED) {
+            throw new IllegalArgumentException(result.error());
+        }
+        if (result.status() == DocumentParseResult.Status.EMPTY) {
+            throw new IllegalArgumentException("没有从文件中解析出可用文本");
+        }
+        // 文件上传入口只负责解析，真正切块、向量化、落库交给 KnowledgeService。
+        return knowledgeService.ingest(result.source(), result.body());
+    }
+
+    public DocumentParseResult parse(String filename, byte[] bytes) {
         if (bytes.length == 0) {
             throw new IllegalArgumentException("文件内容为空");
         }
@@ -32,31 +47,52 @@ public class KnowledgeFileService {
             throw new IllegalArgumentException("文件不能超过 10MB");
         }
         String source = sanitizeSource(filename);
-        String text = extractText(source, bytes);
-        if (text.isBlank()) {
-            throw new IllegalArgumentException("没有从文件中解析出可用文本");
+        String title = titleFromSource(source);
+        List<DocumentParseResult.Page> pages;
+        try {
+            pages = extractPages(source, bytes);
+        } catch (IOException exception) {
+            return new DocumentParseResult(source, title, "", List.of(), List.of(),
+                    DocumentParseResult.Status.FAILED, "PDF 文本解析失败：" + exception.getMessage());
         }
-        return knowledgeService.ingest(source, text);
+        String body = pages.stream()
+                .map(DocumentParseResult.Page::body)
+                .filter(page -> !page.isBlank())
+                .map(String::strip)
+                .collect(Collectors.joining("\n\n"));
+        DocumentParseResult.Status status = body.isBlank()
+                ? DocumentParseResult.Status.EMPTY : DocumentParseResult.Status.SUCCESS;
+        return new DocumentParseResult(source, title, body, pages, List.of(), status, null);
     }
 
-    private String extractText(String filename, byte[] bytes) {
+    private List<DocumentParseResult.Page> extractPages(String filename, byte[] bytes) throws IOException {
         String lower = filename.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".pdf")) {
             return extractPdf(bytes);
         }
         // Markdown 和 txt 都按 UTF-8 文本处理，适合管理员维护轻量知识库。
         if (lower.endsWith(".md") || lower.endsWith(".markdown") || lower.endsWith(".txt")) {
-            return new String(bytes, StandardCharsets.UTF_8);
+            return List.of(new DocumentParseResult.Page(1, new String(bytes, StandardCharsets.UTF_8)));
         }
         throw new IllegalArgumentException("仅支持 PDF、Markdown 和 txt 文件");
     }
 
-    private String extractPdf(byte[] bytes) {
+    private List<DocumentParseResult.Page> extractPdf(byte[] bytes) throws IOException {
         try (PDDocument document = Loader.loadPDF(bytes)) {
-            return new PDFTextStripper().getText(document);
-        } catch (Exception exception) {
-            throw new IllegalArgumentException("PDF 文本解析失败：" + exception.getMessage());
+            PDFTextStripper stripper = new PDFTextStripper();
+            List<DocumentParseResult.Page> pages = new ArrayList<>();
+            for (int number = 1; number <= document.getNumberOfPages(); number++) {
+                stripper.setStartPage(number);
+                stripper.setEndPage(number);
+                pages.add(new DocumentParseResult.Page(number, stripper.getText(document)));
+            }
+            return pages;
         }
+    }
+
+    private String titleFromSource(String source) {
+        int extension = source.lastIndexOf('.');
+        return extension > 0 ? source.substring(0, extension) : source;
     }
 
     private String sanitizeSource(String filename) {
