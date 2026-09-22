@@ -73,6 +73,14 @@ services:
     volumes:
       - chroma-data:/chroma/chroma
 
+  marker:
+    profiles: [marker]
+    build: ./services/marker
+    image: mindbridge-marker:2.0.0
+    container_name: mindbridge-marker
+    ports:
+      - "127.0.0.1:8001:8001"
+
   mailpit:
     image: axllent/mailpit:latest
     container_name: mindbridge-mailpit
