@@ -78,6 +78,9 @@ services:
     build: ./services/marker
     image: mindbridge-marker:2.0.0
     container_name: mindbridge-marker
+    environment:
+      MARKER_MAX_FILE_BYTES: ${MARKER_MAX_FILE_BYTES:-10485760}
+      MARKER_TIMEOUT_SECONDS: ${MARKER_TIMEOUT_SECONDS:-120}
     ports:
       - "127.0.0.1:8001:8001"
 

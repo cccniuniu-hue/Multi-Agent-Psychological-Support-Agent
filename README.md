@@ -139,7 +139,7 @@ Compose 包含以下服务；Marker 使用独立 profile，按需启动：
 | MySQL | `3306` | 业务数据 |
 | Redis | `6379` | 短期会话记忆 |
 | Chroma | `8000` | 知识库和用户画像向量检索 |
-| Marker | `127.0.0.1:8001` | PDF 转 Markdown，返回图片清单与内容 |
+| Marker | `127.0.0.1:8001` | PDF/DOCX 转 Markdown，返回图片清单与内容 |
 | Mailpit | `1025` / `8025` | SMTP 测试服务 / 管理页面 |
 
 Docker Compose 会将 `DEEPSEEK_API_KEY` 注入应用容器。可复制 `.env.example` 为 `.env`，填入真实密钥；`.env` 已被 Git 忽略。对话内容会发往外部 DeepSeek 服务，处理真实心理咨询数据前应明确告知使用者并确认数据处理安排。
@@ -270,7 +270,7 @@ curl -u admin:admin123 \
   http://localhost:8080/api/admin/knowledge
 ```
 
-### Marker PDF 解析服务
+### Marker PDF/DOCX 解析服务
 
 按需启动独立的 Marker 服务（首次运行会加载模型）：
 
@@ -280,7 +280,9 @@ curl -F "file=@sample.pdf;type=application/pdf" \
   http://127.0.0.1:8001/marker/upload
 ```
 
-响应中的 `output` 是 Markdown，`images` 是以 Markdown 相对图片路径为键、Base64 图片内容为值的清单。该服务当前只用于独立解析；管理员上传接口接入 Marker 留待后续计划完成。
+上传文件只支持 `.pdf` 和 `.docx`。默认最大 10MB、转换超时 120 秒，可通过 `MARKER_MAX_FILE_BYTES` 和 `MARKER_TIMEOUT_SECONDS` 调整。成功响应中的 `output` 是 Markdown，`images` 是以 Markdown 相对图片路径为键、Base64 图片内容为值的清单。
+
+失败响应统一为 `{"success":false,"error":{"code":"错误码","message":"说明"}}`。错误码包括 `invalid_request`、`unsupported_file_type`、`empty_file`、`file_too_large`、`conversion_timeout` 和 `conversion_failed`。该服务当前只用于独立解析；管理员上传接口接入 Marker 留待后续计划完成。
 
 ## 接入 DeepSeek API
 
