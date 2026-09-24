@@ -23,7 +23,7 @@ import reactor.core.publisher.Mono;
 /**
  * 管理员知识库维护接口。
  *
- * <p>支持直接写入文本，也支持上传 PDF、Markdown、txt 文件作为 RAG 知识库来源。</p>
+ * <p>支持直接写入文本，也支持上传 PDF、DOCX、Markdown、txt 文件作为 RAG 知识库来源。</p>
  */
 public class KnowledgeController {
 

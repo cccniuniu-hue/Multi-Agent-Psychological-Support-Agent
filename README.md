@@ -186,6 +186,9 @@ docker compose down
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Redis 连接 |
 | `USE_CHROMA` | `true` | 是否使用 Chroma 知识检索 |
 | `CHROMA_TENANT` / `CHROMA_DATABASE` | `default_tenant` / `default_database` | Chroma v2 租户和数据库 |
+| `MARKER_ENABLED` | `false` | 是否让管理员 PDF/DOCX 上传优先调用 Marker |
+| `MARKER_BASE_URL` | `http://localhost:8001` | Marker HTTP 服务地址；Compose 内为 `http://marker:8001` |
+| `MARKER_CLIENT_TIMEOUT_SECONDS` | `125` | Java 客户端等待 Marker 的超时秒数 |
 | `MCP_EMAIL_MODE` | `log` | `log`、`smtp`、`http` 或 `mcp` |
 
 更多模型、MySQL、Chroma、SMTP 和 MCP 参数见本文档后续同名章节。不要将 API Key 或真实密码提交到代码仓库。
@@ -272,17 +275,19 @@ curl -u admin:admin123 \
 
 ### Marker PDF/DOCX 解析服务
 
-按需启动独立的 Marker 服务（首次运行会加载模型）：
+在 `.env` 中设置 `MARKER_ENABLED=true`，再按需启动应用和 Marker 服务（首次运行会加载模型）：
 
 ```bash
-docker compose up -d --build marker
+docker compose --profile marker up -d --build app marker
 curl -F "file=@sample.pdf;type=application/pdf" \
   http://127.0.0.1:8001/marker/upload
+curl -u admin:admin123 -F "file=@sample.pdf;type=application/pdf" \
+  http://127.0.0.1:8080/api/admin/knowledge/file
 ```
 
 上传文件只支持 `.pdf` 和 `.docx`。默认最大 10MB、转换超时 120 秒，可通过 `MARKER_MAX_FILE_BYTES` 和 `MARKER_TIMEOUT_SECONDS` 调整。成功响应中的 `output` 是 Markdown，`images` 是以 Markdown 相对图片路径为键、Base64 图片内容为值的清单。
 
-失败响应统一为 `{"success":false,"error":{"code":"错误码","message":"说明"}}`。错误码包括 `invalid_request`、`unsupported_file_type`、`empty_file`、`file_too_large`、`conversion_timeout` 和 `conversion_failed`。该服务当前只用于独立解析；管理员上传接口接入 Marker 留待后续计划完成。
+失败响应统一为 `{"success":false,"error":{"code":"错误码","message":"说明"}}`。错误码包括 `invalid_request`、`unsupported_file_type`、`empty_file`、`file_too_large`、`conversion_timeout` 和 `conversion_failed`。管理员 PDF/DOCX 上传会优先调用 Marker；Marker 关闭、超时或失败时，PDF 继续使用本地 PDFBox 解析，Markdown 和 txt 始终使用本地 UTF-8 文本解析。DOCX 需要 Marker 成功返回结果。
 
 ## 接入 DeepSeek API
 

@@ -131,6 +131,9 @@ mindbridge:
     chroma-collection: ${CHROMA_COLLECTION:mindbridge_knowledge}
     chunk-size: ${KNOWLEDGE_CHUNK_SIZE:512}
     chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:64}
+    marker-enabled: ${MARKER_ENABLED:false}
+    marker-base-url: ${MARKER_BASE_URL:http://localhost:8001}
+    marker-timeout-seconds: ${MARKER_CLIENT_TIMEOUT_SECONDS:125}
   rag-eval:
     enabled: ${RAG_EVAL_ENABLED:false}
     dataset: ${RAG_EVAL_DATASET:classpath:rag-eval/mindbridge-rag-eval.json}
