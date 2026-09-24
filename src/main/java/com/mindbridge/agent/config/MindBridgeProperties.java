@@ -324,6 +324,9 @@ public class MindBridgeProperties {
         private String chromaCollection = "mindbridge_knowledge";
         private int chunkSize = 512;
         private int chunkOverlap = 64;
+        private boolean markerEnabled;
+        private String markerBaseUrl = "http://localhost:8001";
+        private int markerTimeoutSeconds = 125;
 
         public int getTopK() {
             return topK;
@@ -411,6 +414,30 @@ public class MindBridgeProperties {
 
         public void setChunkOverlap(int chunkOverlap) {
             this.chunkOverlap = chunkOverlap;
+        }
+
+        public boolean isMarkerEnabled() {
+            return markerEnabled;
+        }
+
+        public void setMarkerEnabled(boolean markerEnabled) {
+            this.markerEnabled = markerEnabled;
+        }
+
+        public String getMarkerBaseUrl() {
+            return markerBaseUrl;
+        }
+
+        public void setMarkerBaseUrl(String markerBaseUrl) {
+            this.markerBaseUrl = markerBaseUrl;
+        }
+
+        public int getMarkerTimeoutSeconds() {
+            return markerTimeoutSeconds;
+        }
+
+        public void setMarkerTimeoutSeconds(int markerTimeoutSeconds) {
+            this.markerTimeoutSeconds = markerTimeoutSeconds;
         }
     }
 
