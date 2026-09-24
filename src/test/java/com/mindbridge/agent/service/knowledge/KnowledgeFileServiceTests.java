@@ -2,23 +2,54 @@ package com.mindbridge.agent.service.knowledge;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Optional;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class KnowledgeFileServiceTests {
 
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
-    private final KnowledgeFileService fileService = new KnowledgeFileService(knowledgeService);
+    private final MarkerDocumentClient markerClient = mock(MarkerDocumentClient.class);
+    private final KnowledgeFileService fileService = new KnowledgeFileService(knowledgeService, markerClient);
+
+    @BeforeEach
+    void useLocalParserWhenMarkerHasNoResult() {
+        when(markerClient.parse(anyString(), any())).thenReturn(Optional.empty());
+    }
+
+    @Test
+    void usesMarkerResultForDocxUpload() {
+        byte[] bytes = "docx bytes".getBytes(StandardCharsets.UTF_8);
+        DocumentParseResult markerResult = new DocumentParseResult(
+                "folder-guide.docx",
+                "folder-guide",
+                "# Guide\nUseful advice",
+                List.of(new DocumentParseResult.Page(1, "# Guide\nUseful advice")),
+                List.of(new DocumentParseResult.ImageReference("images/chart.png", null)),
+                DocumentParseResult.Status.SUCCESS,
+                null);
+        when(markerClient.parse("folder-guide.docx", bytes)).thenReturn(Optional.of(markerResult));
+
+        assertThat(fileService.parse("folder/guide.docx", bytes)).isEqualTo(markerResult);
+        fileService.ingest("folder/guide.docx", bytes);
+
+        verify(knowledgeService).ingest("folder-guide.docx", "# Guide\nUseful advice");
+    }
 
     @Test
     void keepsPdfPageNumbersAndDocumentMetadata() throws Exception {

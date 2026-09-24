@@ -22,9 +22,11 @@ public class KnowledgeFileService {
     private static final int MAX_FILE_BYTES = 10 * 1024 * 1024;
 
     private final KnowledgeService knowledgeService;
+    private final MarkerDocumentClient markerClient;
 
-    public KnowledgeFileService(KnowledgeService knowledgeService) {
+    public KnowledgeFileService(KnowledgeService knowledgeService, MarkerDocumentClient markerClient) {
         this.knowledgeService = knowledgeService;
+        this.markerClient = markerClient;
     }
 
     public int ingest(String filename, byte[] bytes) {
@@ -48,6 +50,10 @@ public class KnowledgeFileService {
         }
         String source = sanitizeSource(filename);
         String title = titleFromSource(source);
+        var markerResult = markerClient.parse(source, bytes);
+        if (markerResult.isPresent()) {
+            return markerResult.get();
+        }
         List<DocumentParseResult.Page> pages;
         try {
             pages = extractPages(source, bytes);
