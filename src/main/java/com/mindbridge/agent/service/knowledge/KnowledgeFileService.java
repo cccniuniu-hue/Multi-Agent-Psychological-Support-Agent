@@ -23,10 +23,16 @@ public class KnowledgeFileService {
 
     private final KnowledgeService knowledgeService;
     private final MarkerDocumentClient markerClient;
+    private final MarkdownDocumentParser markdownParser;
 
-    public KnowledgeFileService(KnowledgeService knowledgeService, MarkerDocumentClient markerClient) {
+    public KnowledgeFileService(
+            KnowledgeService knowledgeService,
+            MarkerDocumentClient markerClient,
+            MarkdownDocumentParser markdownParser
+    ) {
         this.knowledgeService = knowledgeService;
         this.markerClient = markerClient;
+        this.markdownParser = markdownParser;
     }
 
     public int ingest(String filename, byte[] bytes) {
@@ -52,7 +58,8 @@ public class KnowledgeFileService {
         String title = titleFromSource(source);
         var markerResult = markerClient.parse(source, bytes);
         if (markerResult.isPresent()) {
-            return markerResult.get();
+            DocumentParseResult result = markerResult.get();
+            return result.withMarkdown(markdownParser.parse(result.body()));
         }
         List<DocumentParseResult.Page> pages;
         try {
@@ -68,7 +75,10 @@ public class KnowledgeFileService {
                 .collect(Collectors.joining("\n\n"));
         DocumentParseResult.Status status = body.isBlank()
                 ? DocumentParseResult.Status.EMPTY : DocumentParseResult.Status.SUCCESS;
-        return new DocumentParseResult(source, title, body, pages, List.of(), status, null);
+        MarkdownDocument markdown = isMarkdown(source)
+                ? markdownParser.parse(body)
+                : MarkdownDocument.empty();
+        return new DocumentParseResult(source, title, body, pages, List.of(), markdown, status, null);
     }
 
     private List<DocumentParseResult.Page> extractPages(String filename, byte[] bytes) throws IOException {
@@ -81,6 +91,11 @@ public class KnowledgeFileService {
             return List.of(new DocumentParseResult.Page(1, new String(bytes, StandardCharsets.UTF_8)));
         }
         throw new IllegalArgumentException("仅支持 PDF、Markdown 和 txt 文件");
+    }
+
+    private boolean isMarkdown(String filename) {
+        String lower = filename.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".md") || lower.endsWith(".markdown");
     }
 
     private List<DocumentParseResult.Page> extractPdf(byte[] bytes) throws IOException {

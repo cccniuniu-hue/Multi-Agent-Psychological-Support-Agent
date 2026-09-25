@@ -289,6 +289,8 @@ curl -u admin:admin123 -F "file=@sample.pdf;type=application/pdf" \
 
 失败响应统一为 `{"success":false,"error":{"code":"错误码","message":"说明"}}`。错误码包括 `invalid_request`、`unsupported_file_type`、`empty_file`、`file_too_large`、`conversion_timeout` 和 `conversion_failed`。管理员 PDF/DOCX 上传会优先调用 Marker；Marker 关闭、超时或失败时，PDF 继续使用本地 PDFBox 解析，Markdown 和 txt 始终使用本地 UTF-8 文本解析。DOCX 需要 Marker 成功返回结果。
 
+Marker 返回的 Markdown 和直接上传的 Markdown 文件会通过 commonmark-java 转为 AST，记录标题层级、段落、GFM 表格和图片引用，为后续按章节切块保留结构信息。
+
 ## 接入 DeepSeek API
 
 设置 `DEEPSEEK_API_KEY` 后直接运行 `./scripts/run-dev.sh`；聊天与流式输出共用 `deepseek-flash`。项目沿用 Spring AI 的 OpenAI 兼容客户端，并默认指定非思考模式，以适配当前单次回复的 token 上限。可通过 `DEEPSEEK_MODEL` 切换 DeepSeek 支持的模型；无需下载 Qwen 或启动 Ollama。

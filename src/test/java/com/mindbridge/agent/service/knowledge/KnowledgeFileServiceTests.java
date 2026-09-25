@@ -25,7 +25,8 @@ class KnowledgeFileServiceTests {
 
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final MarkerDocumentClient markerClient = mock(MarkerDocumentClient.class);
-    private final KnowledgeFileService fileService = new KnowledgeFileService(knowledgeService, markerClient);
+    private final KnowledgeFileService fileService = new KnowledgeFileService(
+            knowledgeService, markerClient, new MarkdownDocumentParser());
 
     @BeforeEach
     void useLocalParserWhenMarkerHasNoResult() {
@@ -45,7 +46,9 @@ class KnowledgeFileServiceTests {
                 null);
         when(markerClient.parse("folder-guide.docx", bytes)).thenReturn(Optional.of(markerResult));
 
-        assertThat(fileService.parse("folder/guide.docx", bytes)).isEqualTo(markerResult);
+        DocumentParseResult parsed = fileService.parse("folder/guide.docx", bytes);
+        assertThat(parsed.markdown().headings())
+                .containsExactly(new MarkdownDocument.Heading(1, "Guide"));
         fileService.ingest("folder/guide.docx", bytes);
 
         verify(knowledgeService).ingest("folder-guide.docx", "# Guide\nUseful advice");
@@ -74,6 +77,10 @@ class KnowledgeFileServiceTests {
         assertThat(result.title()).isEqualTo("folder-guide");
         assertThat(result.pages()).extracting(DocumentParseResult.Page::number).containsExactly(1);
         assertThat(result.images()).isEmpty();
+        assertThat(result.markdown().headings())
+                .containsExactly(new MarkdownDocument.Heading(1, "Guide"));
+        assertThat(result.markdown().blocks()).extracting(MarkdownDocument.Block::text)
+                .containsExactly("Useful advice");
 
         fileService.ingest("folder/guide.md", "# Guide\nUseful advice".getBytes(StandardCharsets.UTF_8));
         verify(knowledgeService).ingest("folder-guide.md", "# Guide\nUseful advice");

@@ -33,4 +33,34 @@ class MarkdownDocumentParserTests {
         assertThat(document.images()).containsExactly(new MarkdownDocument.ImageReference(
                 "images/breath.png", "Breathing chart", "Breathing", List.of(guide, sleep)));
     }
+
+    @Test
+    void extractsGfmTableAsOneStructuredBlock() {
+        String markdown = """
+                # Contacts
+
+                | Name | Phone |
+                | --- | --- |
+                | Center | 12345 |
+                """;
+
+        MarkdownDocument document = new MarkdownDocumentParser().parse(markdown);
+
+        assertThat(document.blocks()).containsExactly(new MarkdownDocument.Block(
+                MarkdownDocument.BlockType.TABLE,
+                "|Name|Phone|\n|---|---|\n|Center|12345|",
+                List.of(new MarkdownDocument.Heading(1, "Contacts"))));
+    }
+
+    @Test
+    void extractsImageReferenceInsideTable() {
+        MarkdownDocument document = new MarkdownDocumentParser().parse("""
+                | Resource |
+                | --- |
+                | ![Campus map](images/map.png) |
+                """);
+
+        assertThat(document.images()).containsExactly(new MarkdownDocument.ImageReference(
+                "images/map.png", "Campus map", null, List.of()));
+    }
 }
