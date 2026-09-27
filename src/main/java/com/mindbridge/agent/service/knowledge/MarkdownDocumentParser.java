@@ -8,9 +8,11 @@ import org.commonmark.ext.gfm.tables.TablesExtension;
 import org.commonmark.node.AbstractVisitor;
 import org.commonmark.node.Code;
 import org.commonmark.node.CustomBlock;
+import org.commonmark.node.FencedCodeBlock;
 import org.commonmark.node.HardLineBreak;
 import org.commonmark.node.Heading;
 import org.commonmark.node.Image;
+import org.commonmark.node.IndentedCodeBlock;
 import org.commonmark.node.Node;
 import org.commonmark.node.Paragraph;
 import org.commonmark.node.SoftLineBreak;
@@ -80,6 +82,16 @@ public class MarkdownDocumentParser {
         }
 
         @Override
+        public void visit(FencedCodeBlock codeBlock) {
+            addCodeBlock(codeBlock);
+        }
+
+        @Override
+        public void visit(IndentedCodeBlock codeBlock) {
+            addCodeBlock(codeBlock);
+        }
+
+        @Override
         public void visit(CustomBlock block) {
             if (block instanceof TableBlock) {
                 blocks.add(new MarkdownDocument.Block(
@@ -90,6 +102,13 @@ public class MarkdownDocumentParser {
                 return;
             }
             visitChildren(block);
+        }
+
+        private void addCodeBlock(Node codeBlock) {
+            blocks.add(new MarkdownDocument.Block(
+                    MarkdownDocument.BlockType.CODE,
+                    markdownRenderer.render(codeBlock).strip(),
+                    headingPath));
         }
 
         private String text(Node node) {

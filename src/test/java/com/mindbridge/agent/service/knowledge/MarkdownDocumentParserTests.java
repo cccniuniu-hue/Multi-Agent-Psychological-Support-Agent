@@ -63,4 +63,27 @@ class MarkdownDocumentParserTests {
         assertThat(document.images()).containsExactly(new MarkdownDocument.ImageReference(
                 "images/map.png", "Campus map", null, List.of()));
     }
+
+    @Test
+    void keepsFencedCodeAsAnIndependentBlock() {
+        MarkdownDocument document = new MarkdownDocumentParser().parse("""
+                # API
+
+                Before code.
+
+                ```java
+                System.out.println("hello");
+                ```
+
+                After code.
+                """);
+
+        assertThat(document.blocks()).extracting(MarkdownDocument.Block::type)
+                .containsExactly(
+                        MarkdownDocument.BlockType.PARAGRAPH,
+                        MarkdownDocument.BlockType.CODE,
+                        MarkdownDocument.BlockType.PARAGRAPH);
+        assertThat(document.blocks().get(1).text())
+                .isEqualTo("```java\nSystem.out.println(\"hello\");\n```");
+    }
 }
