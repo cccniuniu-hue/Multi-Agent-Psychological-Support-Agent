@@ -51,20 +51,39 @@ public class KnowledgeService {
 
     @Transactional
     public int ingest(String source, String content) {
-        // 同一 source 重新上传时先清旧数据，保证后台知识库展示的是最新文件内容。
-        List<String> chunks = chunker.chunk(
+        List<KnowledgeChunker.Chunk> chunks = chunker.chunk(
                 content,
                 properties.getKnowledge().getChunkSize(),
-                properties.getKnowledge().getChunkOverlap());
+                properties.getKnowledge().getChunkOverlap()).stream()
+                .map(text -> new KnowledgeChunker.Chunk(
+                        text, "", MarkdownDocument.BlockType.PARAGRAPH, 0))
+                .toList();
+        return ingest(source, chunks);
+    }
+
+    @Transactional
+    public int ingest(DocumentParseResult parsed) {
+        if (parsed.markdown().blocks().isEmpty()) {
+            return ingest(parsed.source(), parsed.body());
+        }
+        return ingest(parsed.source(), chunker.chunk(
+                parsed.markdown(), properties.getKnowledge().getChunkSize()));
+    }
+
+    private int ingest(String source, List<KnowledgeChunker.Chunk> chunks) {
+        // 同一 source 重新上传时先清旧数据，保证后台知识库展示的是最新文件内容。
         knowledgeChunkRepository.deleteBySource(source);
         chromaGateway.deleteSource(source);
         for (int index = 0; index < chunks.size(); index++) {
+            KnowledgeChunker.Chunk parsedChunk = chunks.get(index);
             KnowledgeChunk chunk = new KnowledgeChunk();
             chunk.setSource(source);
             chunk.setSourceIndex(index);
-            chunk.setContent(chunks.get(index));
+            chunk.setContent(parsedChunk.content());
+            chunk.setSectionPath(parsedChunk.sectionPath());
+            chunk.setContentType(parsedChunk.type().name());
             // 有 embedding 配置时写入向量；没有配置时保持为空，检索会自动走本地兜底。
-            List<Double> embedding = safeEmbedding(chunks.get(index));
+            List<Double> embedding = safeEmbedding(parsedChunk.content());
             chunk.setEmbeddingJson(serializeEmbedding(embedding));
             String embeddingModel = embedding.isEmpty() ? "" : embeddingClient.modelName();
             if (embeddingModel != null && !embeddingModel.isBlank()) {

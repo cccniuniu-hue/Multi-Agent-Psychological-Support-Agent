@@ -69,6 +69,38 @@ class KnowledgeServiceEmbeddingTests {
     }
 
     @Test
+    void storesSectionAndBlockTypeFromParsedMarkdown() {
+        MarkdownDocument.Heading guide = new MarkdownDocument.Heading(1, "Guide");
+        MarkdownDocument.Heading sleep = new MarkdownDocument.Heading(2, "Sleep");
+        MarkdownDocument markdown = new MarkdownDocument(
+                List.of(guide, sleep),
+                List.of(new MarkdownDocument.Block(
+                        MarkdownDocument.BlockType.PARAGRAPH,
+                        "支持性倾听",
+                        List.of(guide, sleep))),
+                List.of());
+        DocumentParseResult parsed = new DocumentParseResult(
+                "guide.md",
+                "guide",
+                "支持性倾听",
+                List.of(),
+                List.of(),
+                markdown,
+                DocumentParseResult.Status.SUCCESS,
+                null);
+        when(embeddingClient.embed("支持性倾听")).thenReturn(EMBEDDING);
+        when(repository.save(org.mockito.ArgumentMatchers.any(KnowledgeChunk.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThat(service.ingest(parsed)).isEqualTo(1);
+
+        ArgumentCaptor<KnowledgeChunk> chunkCaptor = ArgumentCaptor.forClass(KnowledgeChunk.class);
+        verify(repository).save(chunkCaptor.capture());
+        assertThat(chunkCaptor.getValue().getSectionPath()).isEqualTo("Guide / Sleep");
+        assertThat(chunkCaptor.getValue().getContentType()).isEqualTo("PARAGRAPH");
+    }
+
+    @Test
     void reusesOneQueryEmbeddingForChromaAndLocalFallback() {
         String query = "如何提供支持";
         KnowledgeChunk chunk = new KnowledgeChunk();

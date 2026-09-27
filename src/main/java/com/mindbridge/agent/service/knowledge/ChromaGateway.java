@@ -51,6 +51,8 @@ public class ChromaGateway {
                 "metadatas", List.of(Map.of(
                         "source", chunk.getSource(),
                         "sourceIndex", chunk.getSourceIndex(),
+                        "sectionPath", chunk.getSectionPath() == null ? "" : chunk.getSectionPath(),
+                        "contentType", chunk.getContentType(),
                         "embeddingModel", chunk.getEmbeddingModel(),
                         "embeddingDimensions", chunk.getEmbeddingDimensions()))
         );

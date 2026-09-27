@@ -44,7 +44,7 @@ public class KnowledgeFileService {
             throw new IllegalArgumentException("没有从文件中解析出可用文本");
         }
         // 文件上传入口只负责解析，真正切块、向量化、落库交给 KnowledgeService。
-        return knowledgeService.ingest(result.source(), result.body());
+        return knowledgeService.ingest(result);
     }
 
     public DocumentParseResult parse(String filename, byte[] bytes) {

@@ -32,6 +32,12 @@ public class KnowledgeChunk {
     @Column(nullable = false)
     private String content;
 
+    @Column(length = 500)
+    private String sectionPath;
+
+    @Column(nullable = false, length = 32, columnDefinition = "varchar(32) default 'PARAGRAPH'")
+    private String contentType = "PARAGRAPH";
+
     @Lob
     private String embeddingJson;
 
@@ -69,6 +75,22 @@ public class KnowledgeChunk {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getSectionPath() {
+        return sectionPath;
+    }
+
+    public void setSectionPath(String sectionPath) {
+        this.sectionPath = sectionPath;
+    }
+
+    public String getContentType() {
+        return contentType;
+    }
+
+    public void setContentType(String contentType) {
+        this.contentType = contentType;
     }
 
     public String getEmbeddingJson() {

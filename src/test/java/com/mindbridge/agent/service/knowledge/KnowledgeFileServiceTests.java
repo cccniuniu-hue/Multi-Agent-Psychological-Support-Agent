@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -51,7 +52,8 @@ class KnowledgeFileServiceTests {
                 .containsExactly(new MarkdownDocument.Heading(1, "Guide"));
         fileService.ingest("folder/guide.docx", bytes);
 
-        verify(knowledgeService).ingest("folder-guide.docx", "# Guide\nUseful advice");
+        verify(knowledgeService).ingest(argThat(ingested ->
+                ingested.source().equals("folder-guide.docx") && !ingested.markdown().blocks().isEmpty()));
     }
 
     @Test
@@ -83,7 +85,8 @@ class KnowledgeFileServiceTests {
                 .containsExactly("Useful advice");
 
         fileService.ingest("folder/guide.md", "# Guide\nUseful advice".getBytes(StandardCharsets.UTF_8));
-        verify(knowledgeService).ingest("folder-guide.md", "# Guide\nUseful advice");
+        verify(knowledgeService).ingest(argThat(ingested ->
+                ingested.source().equals("folder-guide.md") && !ingested.markdown().blocks().isEmpty()));
 
         DocumentParseResult empty = fileService.parse("empty.txt", " \n".getBytes(StandardCharsets.UTF_8));
         assertThat(empty.status()).isEqualTo(DocumentParseResult.Status.EMPTY);
