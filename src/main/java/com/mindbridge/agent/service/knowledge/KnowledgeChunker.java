@@ -24,7 +24,9 @@ public class KnowledgeChunker {
             if (block.type() != MarkdownDocument.BlockType.PARAGRAPH) {
                 addChunk(chunks, pending, pendingSection, MarkdownDocument.BlockType.PARAGRAPH);
                 pending = "";
-                chunks.add(new Chunk(block.text(), section, block.type(), estimateTokens(block.text())));
+                for (String part : splitStructuredBlock(block, limit)) {
+                    chunks.add(new Chunk(part, section, block.type(), estimateTokens(part)));
+                }
                 continue;
             }
 
@@ -83,6 +85,59 @@ public class KnowledgeChunker {
         if (!content.isBlank()) {
             chunks.add(new Chunk(content, section, type, estimateTokens(content)));
         }
+    }
+
+    private List<String> splitStructuredBlock(MarkdownDocument.Block block, int maxTokens) {
+        if (estimateTokens(block.text()) <= maxTokens) {
+            return List.of(block.text());
+        }
+        return switch (block.type()) {
+            case TABLE -> splitTable(block.text(), maxTokens);
+            case CODE -> splitCode(block.text(), maxTokens);
+            case PARAGRAPH -> splitByTokens(block.text(), maxTokens);
+        };
+    }
+
+    private List<String> splitTable(String table, int maxTokens) {
+        List<String> lines = table.lines().toList();
+        if (lines.size() < 3) {
+            return List.of(table);
+        }
+        return splitLines(lines.subList(2, lines.size()),
+                lines.get(0) + "\n" + lines.get(1), "", maxTokens);
+    }
+
+    private List<String> splitCode(String code, int maxTokens) {
+        List<String> lines = code.lines().toList();
+        if (lines.size() >= 3
+                && (lines.get(0).startsWith("```") || lines.get(0).startsWith("~~~"))
+                && lines.get(lines.size() - 1).startsWith(lines.get(0).substring(0, 3))) {
+            return splitLines(lines.subList(1, lines.size() - 1),
+                    lines.get(0), lines.get(lines.size() - 1), maxTokens);
+        }
+        return splitLines(lines, "", "", maxTokens);
+    }
+
+    private List<String> splitLines(List<String> lines, String prefix, String suffix, int maxTokens) {
+        List<String> parts = new ArrayList<>();
+        List<String> current = new ArrayList<>();
+        for (String line : lines) {
+            String candidate = String.join("\n", current) + (current.isEmpty() ? "" : "\n") + line;
+            if (!current.isEmpty() && estimateTokens(wrap(prefix, candidate, suffix)) > maxTokens) {
+                parts.add(wrap(prefix, String.join("\n", current), suffix));
+                current.clear();
+            }
+            current.add(line);
+        }
+        if (!current.isEmpty()) {
+            parts.add(wrap(prefix, String.join("\n", current), suffix));
+        }
+        return parts.isEmpty() ? List.of(wrap(prefix, "", suffix)) : parts;
+    }
+
+    private String wrap(String prefix, String content, String suffix) {
+        String wrapped = prefix.isEmpty() ? content : prefix + "\n" + content;
+        return suffix.isEmpty() ? wrapped : wrapped + "\n" + suffix;
     }
 
     private List<String> splitByTokens(String text, int maxTokens) {

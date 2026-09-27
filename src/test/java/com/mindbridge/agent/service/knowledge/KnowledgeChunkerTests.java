@@ -35,4 +35,42 @@ class KnowledgeChunkerTests {
             assertThat(chunk.estimatedTokens()).isLessThanOrEqualTo(4);
         });
     }
+
+    @Test
+    void splitsLongTablesByRowsAndRepeatsTheHeader() {
+        MarkdownDocument.Block table = new MarkdownDocument.Block(
+                MarkdownDocument.BlockType.TABLE,
+                "|Name|Phone|\n|---|---|\n|A|111|\n|B|222|",
+                List.of());
+
+        List<KnowledgeChunker.Chunk> chunks = new KnowledgeChunker().chunk(
+                new MarkdownDocument(List.of(), List.of(table), List.of()), 7);
+
+        assertThat(chunks).extracting(KnowledgeChunker.Chunk::content)
+                .containsExactly(
+                        "|Name|Phone|\n|---|---|\n|A|111|",
+                        "|Name|Phone|\n|---|---|\n|B|222|");
+        assertThat(chunks).allSatisfy(chunk -> {
+            assertThat(chunk.type()).isEqualTo(MarkdownDocument.BlockType.TABLE);
+            assertThat(chunk.estimatedTokens()).isLessThanOrEqualTo(7);
+        });
+    }
+
+    @Test
+    void splitsLongCodeBlocksWithoutDroppingFences() {
+        MarkdownDocument.Block code = new MarkdownDocument.Block(
+                MarkdownDocument.BlockType.CODE,
+                "```java\nalpha();\nbeta();\n```",
+                List.of());
+
+        List<KnowledgeChunker.Chunk> chunks = new KnowledgeChunker().chunk(
+                new MarkdownDocument(List.of(), List.of(code), List.of()), 5);
+
+        assertThat(chunks).extracting(KnowledgeChunker.Chunk::content)
+                .containsExactly("```java\nalpha();\n```", "```java\nbeta();\n```");
+        assertThat(chunks).allSatisfy(chunk -> {
+            assertThat(chunk.type()).isEqualTo(MarkdownDocument.BlockType.CODE);
+            assertThat(chunk.estimatedTokens()).isLessThanOrEqualTo(5);
+        });
+    }
 }
