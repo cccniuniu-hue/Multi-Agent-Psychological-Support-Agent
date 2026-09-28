@@ -189,6 +189,7 @@ docker compose down
 | `MARKER_ENABLED` | `false` | 是否让管理员 PDF/DOCX 上传优先调用 Marker |
 | `MARKER_BASE_URL` | `http://localhost:8001` | Marker HTTP 服务地址；Compose 内为 `http://marker:8001` |
 | `MARKER_CLIENT_TIMEOUT_SECONDS` | `125` | Java 客户端等待 Marker 的超时秒数 |
+| `QWEN2VL_MODEL` | `Qwen/Qwen2-VL-7B-Instruct` | 本地图片描述服务使用的模型 |
 | `MCP_EMAIL_MODE` | `log` | `log`、`smtp`、`http` 或 `mcp` |
 
 更多模型、MySQL、Chroma、SMTP 和 MCP 参数见本文档后续同名章节。不要将 API Key 或真实密码提交到代码仓库。
@@ -290,6 +291,18 @@ curl -u admin:admin123 -F "file=@sample.pdf;type=application/pdf" \
 失败响应统一为 `{"success":false,"error":{"code":"错误码","message":"说明"}}`。错误码包括 `invalid_request`、`unsupported_file_type`、`empty_file`、`file_too_large`、`conversion_timeout` 和 `conversion_failed`。管理员 PDF/DOCX 上传会优先调用 Marker；Marker 关闭、超时或失败时，PDF 继续使用本地 PDFBox 解析，Markdown 和 txt 始终使用本地 UTF-8 文本解析。DOCX 需要 Marker 成功返回结果。
 
 Marker 返回的 Markdown 和直接上传的 Markdown 文件会通过 commonmark-java 转为 AST，记录标题层级、段落、GFM 表格和图片引用，为后续按章节切块保留结构信息。
+
+### Qwen2-VL 图片描述服务
+
+在已配置 NVIDIA Container Toolkit 的 GPU 主机上启动图片描述服务：
+
+```bash
+docker compose --profile vision up -d --build qwen2vl
+curl -F "file=@chart.png;type=image/png" \
+  http://127.0.0.1:8002/qwen2-vl/describe
+```
+
+接口支持 PNG、JPEG 和 WebP，默认最大 10MB、超时 60 秒。响应包含图片类型、摘要、核心元素、关键关系和数据结论；模型输出无法解析为约定 JSON 时返回 `invalid_model_response`。当前接口独立提供图片描述能力，文档上传链路将在后续步骤接入。
 
 ## 接入 DeepSeek API
 

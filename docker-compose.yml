@@ -87,6 +87,20 @@ services:
     ports:
       - "127.0.0.1:8001:8001"
 
+  qwen2vl:
+    profiles: [vision]
+    build: ./services/qwen2vl
+    image: mindbridge-qwen2vl:7b
+    container_name: mindbridge-qwen2vl
+    environment:
+      QWEN2VL_MODEL: ${QWEN2VL_MODEL:-Qwen/Qwen2-VL-7B-Instruct}
+      QWEN2VL_MAX_IMAGE_BYTES: ${QWEN2VL_MAX_IMAGE_BYTES:-10485760}
+      QWEN2VL_TIMEOUT_SECONDS: ${QWEN2VL_TIMEOUT_SECONDS:-60}
+      QWEN2VL_MAX_NEW_TOKENS: ${QWEN2VL_MAX_NEW_TOKENS:-512}
+    gpus: all
+    ports:
+      - "127.0.0.1:8002:8002"
+
   mailpit:
     image: axllent/mailpit:latest
     container_name: mindbridge-mailpit
