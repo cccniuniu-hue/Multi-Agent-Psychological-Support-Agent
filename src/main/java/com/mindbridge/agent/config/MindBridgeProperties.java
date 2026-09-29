@@ -327,6 +327,9 @@ public class MindBridgeProperties {
         private boolean markerEnabled;
         private String markerBaseUrl = "http://localhost:8001";
         private int markerTimeoutSeconds = 125;
+        private boolean imageDescriptionEnabled;
+        private String imageDescriptionBaseUrl = "http://localhost:8002";
+        private int imageDescriptionTimeoutSeconds = 65;
 
         public int getTopK() {
             return topK;
@@ -438,6 +441,30 @@ public class MindBridgeProperties {
 
         public void setMarkerTimeoutSeconds(int markerTimeoutSeconds) {
             this.markerTimeoutSeconds = markerTimeoutSeconds;
+        }
+
+        public boolean isImageDescriptionEnabled() {
+            return imageDescriptionEnabled;
+        }
+
+        public void setImageDescriptionEnabled(boolean imageDescriptionEnabled) {
+            this.imageDescriptionEnabled = imageDescriptionEnabled;
+        }
+
+        public String getImageDescriptionBaseUrl() {
+            return imageDescriptionBaseUrl;
+        }
+
+        public void setImageDescriptionBaseUrl(String imageDescriptionBaseUrl) {
+            this.imageDescriptionBaseUrl = imageDescriptionBaseUrl;
+        }
+
+        public int getImageDescriptionTimeoutSeconds() {
+            return imageDescriptionTimeoutSeconds;
+        }
+
+        public void setImageDescriptionTimeoutSeconds(int imageDescriptionTimeoutSeconds) {
+            this.imageDescriptionTimeoutSeconds = imageDescriptionTimeoutSeconds;
         }
     }
 

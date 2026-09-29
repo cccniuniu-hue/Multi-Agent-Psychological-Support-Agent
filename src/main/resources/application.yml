@@ -134,6 +134,9 @@ mindbridge:
     marker-enabled: ${MARKER_ENABLED:false}
     marker-base-url: ${MARKER_BASE_URL:http://localhost:8001}
     marker-timeout-seconds: ${MARKER_CLIENT_TIMEOUT_SECONDS:125}
+    image-description-enabled: ${QWEN2VL_ENABLED:false}
+    image-description-base-url: ${QWEN2VL_BASE_URL:http://localhost:8002}
+    image-description-timeout-seconds: ${QWEN2VL_CLIENT_TIMEOUT_SECONDS:65}
   rag-eval:
     enabled: ${RAG_EVAL_ENABLED:false}
     dataset: ${RAG_EVAL_DATASET:classpath:rag-eval/mindbridge-rag-eval.json}
