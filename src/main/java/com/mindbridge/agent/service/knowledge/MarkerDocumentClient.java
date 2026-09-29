@@ -21,7 +21,10 @@ public class MarkerDocumentClient {
 
     public MarkerDocumentClient(MindBridgeProperties properties, WebClient.Builder webClientBuilder) {
         this.config = properties.getKnowledge();
-        this.webClient = webClientBuilder.baseUrl(config.getMarkerBaseUrl()).build();
+        // Marker 的 JSON 包含 Base64 图片，允许有上限的较大响应。
+        this.webClient = webClientBuilder.baseUrl(config.getMarkerBaseUrl())
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(32 * 1024 * 1024))
+                .build();
     }
 
     public Optional<DocumentParseResult> parse(String filename, byte[] bytes) {
@@ -50,8 +53,8 @@ public class MarkerDocumentClient {
             String title = valueOrDefault(response.title(), titleFromSource(source));
             List<DocumentParseResult.ImageReference> images = response.images() == null
                     ? List.of()
-                    : response.images().keySet().stream()
-                            .map(path -> new DocumentParseResult.ImageReference(path, null))
+                    : response.images().entrySet().stream()
+                            .map(image -> new DocumentParseResult.ImageReference(image.getKey(), null, image.getValue()))
                             .toList();
             return Optional.of(new DocumentParseResult(
                     source,

@@ -24,15 +24,18 @@ public class KnowledgeFileService {
     private final KnowledgeService knowledgeService;
     private final MarkerDocumentClient markerClient;
     private final MarkdownDocumentParser markdownParser;
+    private final ImageDescriptionClient imageClient;
 
     public KnowledgeFileService(
             KnowledgeService knowledgeService,
             MarkerDocumentClient markerClient,
-            MarkdownDocumentParser markdownParser
+            MarkdownDocumentParser markdownParser,
+            ImageDescriptionClient imageClient
     ) {
         this.knowledgeService = knowledgeService;
         this.markerClient = markerClient;
         this.markdownParser = markdownParser;
+        this.imageClient = imageClient;
     }
 
     public int ingest(String filename, byte[] bytes) {
@@ -59,7 +62,13 @@ public class KnowledgeFileService {
         var markerResult = markerClient.parse(source, bytes);
         if (markerResult.isPresent()) {
             DocumentParseResult result = markerResult.get();
-            return result.withMarkdown(markdownParser.parse(result.body()));
+            List<DocumentParseResult.ImageReference> images = result.images().stream()
+                    .map(image -> image.base64Content() == null || image.base64Content().isBlank()
+                            ? image
+                            : imageClient.describe(image.path(), image.base64Content())
+                                    .map(image::withDescription).orElse(image))
+                    .toList();
+            return result.withImages(images).withMarkdown(markdownParser.parse(result.body()));
         }
         List<DocumentParseResult.Page> pages;
         try {

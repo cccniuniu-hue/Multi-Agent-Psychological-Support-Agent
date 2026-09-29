@@ -189,6 +189,9 @@ docker compose down
 | `MARKER_ENABLED` | `false` | 是否让管理员 PDF/DOCX 上传优先调用 Marker |
 | `MARKER_BASE_URL` | `http://localhost:8001` | Marker HTTP 服务地址；Compose 内为 `http://marker:8001` |
 | `MARKER_CLIENT_TIMEOUT_SECONDS` | `125` | Java 客户端等待 Marker 的超时秒数 |
+| `QWEN2VL_ENABLED` | `false` | 是否为 Marker 解析出的图片请求结构化描述 |
+| `QWEN2VL_BASE_URL` | `http://localhost:8002` | 图片描述 HTTP 服务地址；Compose 内为 `http://qwen2vl:8002` |
+| `QWEN2VL_CLIENT_TIMEOUT_SECONDS` | `65` | Java 客户端等待单张图片描述的超时秒数 |
 | `QWEN2VL_MODEL` | `Qwen/Qwen2-VL-7B-Instruct` | 本地图片描述服务使用的模型 |
 | `MCP_EMAIL_MODE` | `log` | `log`、`smtp`、`http` 或 `mcp` |
 
@@ -302,7 +305,17 @@ curl -F "file=@chart.png;type=image/png" \
   http://127.0.0.1:8002/qwen2-vl/describe
 ```
 
-接口支持 PNG、JPEG 和 WebP，默认最大 10MB、超时 60 秒。响应包含图片类型、摘要、核心元素、关键关系和数据结论；模型输出无法解析为约定 JSON 时返回 `invalid_model_response`。当前接口独立提供图片描述能力，文档上传链路将在后续步骤接入。
+接口支持 PNG、JPEG 和 WebP，默认最大 10MB、超时 60 秒。响应包含图片类型、摘要、核心元素、关键关系和数据结论；模型输出无法解析为约定 JSON 时返回 `invalid_model_response`。
+
+管理员文档上传也可以调用该服务。在 `.env` 中同时设置 `MARKER_ENABLED=true` 和 `QWEN2VL_ENABLED=true`，再启动相应服务：
+
+```bash
+docker compose --profile marker --profile vision up -d --build app marker qwen2vl
+```
+
+Java 客户端读取 Marker 返回的 Base64 图片内容，按 PNG、JPEG 或 WebP 上传，并将结构化描述关联到解析结果中的原图片相对路径。即使不同目录的图片文件名相同，仍分别保留原路径和描述。单张图片超时、格式不支持、内容无效或服务失败时跳过描述，继续解析正文和其他图片。Marker 响应的读取上限为 32MiB；图片内容仅在解析过程中使用，不输出到解析结果的 JSON 中。
+
+当前描述保存在文档解析结果的图片清单中，Markdown 正文和原图片引用保持完整；描述回填与独立检索 chunk 按实施计划继续接入。直接上传 Markdown 中的外部图片链接或本地文件路径不会触发下载。图片描述服务独立于默认 DeepSeek 聊天模型及知识库 Embedding 配置。
 
 ## 接入 DeepSeek API
 

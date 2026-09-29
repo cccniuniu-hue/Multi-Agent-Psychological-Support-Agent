@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -26,8 +27,9 @@ class KnowledgeFileServiceTests {
 
     private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
     private final MarkerDocumentClient markerClient = mock(MarkerDocumentClient.class);
+    private final ImageDescriptionClient imageClient = mock(ImageDescriptionClient.class);
     private final KnowledgeFileService fileService = new KnowledgeFileService(
-            knowledgeService, markerClient, new MarkdownDocumentParser());
+            knowledgeService, markerClient, new MarkdownDocumentParser(), imageClient);
 
     @BeforeEach
     void useLocalParserWhenMarkerHasNoResult() {
@@ -54,6 +56,37 @@ class KnowledgeFileServiceTests {
 
         verify(knowledgeService).ingest(argThat(ingested ->
                 ingested.source().equals("folder-guide.docx") && !ingested.markdown().blocks().isEmpty()));
+    }
+
+    @Test
+    void associatesDescriptionsWithOriginalPathsAndContinuesAfterAnImageFails() throws Exception {
+        byte[] bytes = "docx bytes".getBytes(StandardCharsets.UTF_8);
+        String body = "# Guide\n![First](images/first/chart.png)\n![Second](images/second/chart.png)";
+        String imageContent = "cG5nLWRhdGE=";
+        var failedImage = new DocumentParseResult.ImageReference("images/first/chart.png", 1, imageContent);
+        var successfulImage = new DocumentParseResult.ImageReference("images/second/chart.png", 2, imageContent);
+        var missingImage = new DocumentParseResult.ImageReference("images/missing.png", null);
+        var description = new ImageDescription("bar_chart", "Peak score: 8", List.of("Score"), List.of(), List.of("8"));
+        var markerResult = new DocumentParseResult("guide.docx", "guide", body,
+                List.of(new DocumentParseResult.Page(1, body)),
+                List.of(failedImage, successfulImage, missingImage), DocumentParseResult.Status.SUCCESS, null);
+        when(markerClient.parse("guide.docx", bytes)).thenReturn(Optional.of(markerResult));
+        when(imageClient.describe(failedImage.path(), imageContent)).thenReturn(Optional.empty());
+        when(imageClient.describe(successfulImage.path(), imageContent)).thenReturn(Optional.of(description));
+
+        DocumentParseResult result = fileService.parse("guide.docx", bytes);
+
+        assertThat(result.body()).isEqualTo(body);
+        assertThat(result.pages()).isEqualTo(markerResult.pages());
+        assertThat(result.images()).containsExactly(failedImage, successfulImage.withDescription(description), missingImage);
+        assertThat(result.markdown().images()).extracting(MarkdownDocument.ImageReference::destination)
+                .containsExactly(failedImage.path(), successfulImage.path());
+        assertThat(new ObjectMapper().writeValueAsString(result.images()))
+                .contains("images/second/chart.png", "Peak score: 8").doesNotContain(imageContent, "base64Content");
+
+        fileService.ingest("guide.docx", bytes);
+        verify(knowledgeService).ingest(argThat(ingested ->
+                description.equals(ingested.images().get(1).description()) && ingested.body().equals(body)));
     }
 
     @Test

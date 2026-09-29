@@ -17,6 +17,7 @@ class MarkerDocumentClientTests {
 
     private HttpServer server;
     private String requestBody;
+    private final String imageContent = "cG5n".repeat(90_000);
 
     @BeforeEach
     void setUp() throws IOException {
@@ -45,15 +46,16 @@ class MarkerDocumentClientTests {
         assertThat(result.title()).isEqualTo("guide");
         assertThat(result.body()).isEqualTo("# Guide\nUseful advice");
         assertThat(result.pages()).containsExactly(new DocumentParseResult.Page(1, "# Guide\nUseful advice"));
-        assertThat(result.images()).containsExactly(new DocumentParseResult.ImageReference("images/chart.png", null));
+        assertThat(result.images()).containsExactly(
+                new DocumentParseResult.ImageReference("images/chart.png", null, imageContent));
         assertThat(result.status()).isEqualTo(DocumentParseResult.Status.SUCCESS);
     }
 
     private void handleUpload(HttpExchange exchange) throws IOException {
         requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         byte[] response = """
-                {"success":true,"source":"guide.docx","title":"guide","output":"# Guide\\nUseful advice","images":{"images/chart.png":"base64"}}
-                """.getBytes(StandardCharsets.UTF_8);
+                {"success":true,"source":"guide.docx","title":"guide","output":"# Guide\\nUseful advice","images":{"images/chart.png":"%s"}}
+                """.formatted(imageContent).getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");
         exchange.sendResponseHeaders(200, response.length);
         exchange.getResponseBody().write(response);
