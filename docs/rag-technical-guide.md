@@ -190,6 +190,8 @@ curl -u admin:admin123 \
 | `source` | 来源文件或来源名 | 展示、删除、按来源刷新 |
 | `sourceIndex` | 同一 source 内的切块顺序 | 检索命中后取前后邻居 |
 | `content` | 切块文本 | BM25、prompt 注入、Chroma 文档 |
+| `contentType` | 段落、表格、代码或图片 | 区分图片描述的独立检索块 |
+| `imagePath` | 原图片相对路径 | 保留图片块的原图来源，也同步到 Chroma 元数据 |
 | `embeddingJson` | 向量 JSON | 本地向量相似度兜底 |
 | `embeddingModel` | embedding 模型名 | 标识生成当前向量的模型版本 |
 | `embeddingDimensions` | 向量维度 | 防止查询向量和历史向量维度混用 |

@@ -53,6 +53,7 @@ public class ChromaGateway {
                         "sourceIndex", chunk.getSourceIndex(),
                         "sectionPath", chunk.getSectionPath() == null ? "" : chunk.getSectionPath(),
                         "contentType", chunk.getContentType(),
+                        "imagePath", chunk.getImagePath() == null ? "" : chunk.getImagePath(),
                         "embeddingModel", chunk.getEmbeddingModel(),
                         "embeddingDimensions", chunk.getEmbeddingDimensions()))
         );

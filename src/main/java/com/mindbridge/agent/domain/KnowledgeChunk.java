@@ -39,6 +39,9 @@ public class KnowledgeChunk {
     private String contentType = "PARAGRAPH";
 
     @Lob
+    private String imagePath;
+
+    @Lob
     private String embeddingJson;
 
     @Column(length = 120)
@@ -91,6 +94,14 @@ public class KnowledgeChunk {
 
     public void setContentType(String contentType) {
         this.contentType = contentType;
+    }
+
+    public String getImagePath() {
+        return imagePath;
+    }
+
+    public void setImagePath(String imagePath) {
+        this.imagePath = imagePath;
     }
 
     public String getEmbeddingJson() {

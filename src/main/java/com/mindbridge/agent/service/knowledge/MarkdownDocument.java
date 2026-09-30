@@ -42,6 +42,7 @@ public record MarkdownDocument(
     public enum BlockType {
         PARAGRAPH,
         TABLE,
-        CODE
+        CODE,
+        IMAGE
     }
 }

@@ -17,10 +17,7 @@ public class KnowledgeChunker {
         String pendingSection = "";
 
         for (MarkdownDocument.Block block : document.blocks()) {
-            String section = block.headingPath().stream()
-                    .map(MarkdownDocument.Heading::text)
-                    .reduce((left, right) -> left + " / " + right)
-                    .orElse("");
+            String section = sectionPath(block.headingPath());
             if (block.type() != MarkdownDocument.BlockType.PARAGRAPH) {
                 addChunk(chunks, pending, pendingSection, MarkdownDocument.BlockType.PARAGRAPH);
                 pending = "";
@@ -50,6 +47,54 @@ public class KnowledgeChunker {
         }
         addChunk(chunks, pending, pendingSection, MarkdownDocument.BlockType.PARAGRAPH);
         return chunks;
+    }
+
+    public List<Chunk> chunkImages(
+            List<DocumentParseResult.ImageReference> images, MarkdownDocument document, int maxTokens
+    ) {
+        List<Chunk> chunks = new ArrayList<>();
+        for (DocumentParseResult.ImageReference image : images) {
+            if (image.path() == null || image.path().isBlank() || image.description() == null
+                    || image.description().summary() == null || image.description().summary().isBlank()) {
+                continue;
+            }
+            ImageDescription description = image.description();
+            String section = document.images().stream()
+                    .filter(reference -> image.path().equals(reference.destination()))
+                    .findFirst()
+                    .map(reference -> sectionPath(reference.headingPath()))
+                    .orElse("");
+            StringBuilder text = new StringBuilder();
+            if (description.imageType() != null && !description.imageType().isBlank()) {
+                text.append("图片类型：").append(description.imageType()).append('\n');
+            }
+            text.append("摘要：").append(description.summary());
+            if (!description.coreElements().isEmpty()) {
+                text.append("\n核心元素：").append(String.join("、", description.coreElements()));
+            }
+            if (!description.keyRelations().isEmpty()) {
+                text.append("\n关键关系：").append(String.join("、", description.keyRelations()));
+            }
+            if (!description.dataInsights().isEmpty()) {
+                text.append("\n数据结论：").append(String.join("、", description.dataInsights()));
+            }
+            String prefix = "原图：" + image.path() + "\n";
+            // ponytail: 极长路径本身可能超过 token 上限；保留完整来源，描述仍按预算切分。
+            int budget = Math.max(1, Math.max(1, maxTokens) - estimateTokens(prefix));
+            for (String part : splitByTokens(text.toString(), budget)) {
+                String content = prefix + part;
+                chunks.add(new Chunk(content, section, MarkdownDocument.BlockType.IMAGE,
+                        estimateTokens(content), image.path()));
+            }
+        }
+        return chunks;
+    }
+
+    private String sectionPath(List<MarkdownDocument.Heading> headingPath) {
+        return headingPath.stream()
+                .map(MarkdownDocument.Heading::text)
+                .reduce((left, right) -> left + " / " + right)
+                .orElse("");
     }
 
     public List<String> chunk(String content, int chunkSize, int overlap) {
@@ -95,6 +140,7 @@ public class KnowledgeChunker {
             case TABLE -> splitTable(block.text(), maxTokens);
             case CODE -> splitCode(block.text(), maxTokens);
             case PARAGRAPH -> splitByTokens(block.text(), maxTokens);
+            case IMAGE -> splitByTokens(block.text(), maxTokens);
         };
     }
 
@@ -179,7 +225,11 @@ public class KnowledgeChunker {
             String content,
             String sectionPath,
             MarkdownDocument.BlockType type,
-            int estimatedTokens
+            int estimatedTokens,
+            String imagePath
     ) {
+        public Chunk(String content, String sectionPath, MarkdownDocument.BlockType type, int estimatedTokens) {
+            this(content, sectionPath, type, estimatedTokens, null);
+        }
     }
 }

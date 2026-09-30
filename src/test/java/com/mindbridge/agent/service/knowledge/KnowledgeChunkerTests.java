@@ -73,4 +73,22 @@ class KnowledgeChunkerTests {
             assertThat(chunk.estimatedTokens()).isLessThanOrEqualTo(5);
         });
     }
+
+    @Test
+    void repeatsOriginalImagePathWhenDescriptionNeedsMultipleChunks() {
+        String path = "images/chart.png";
+        ImageDescription description = new ImageDescription("chart", "A".repeat(120),
+                List.of(), List.of(), List.of());
+        var image = new DocumentParseResult.ImageReference(path, null, null, description);
+
+        List<KnowledgeChunker.Chunk> chunks = new KnowledgeChunker().chunkImages(
+                List.of(image), MarkdownDocument.empty(), 12);
+
+        assertThat(chunks).hasSizeGreaterThan(1).allSatisfy(chunk -> {
+            assertThat(chunk.content()).startsWith("原图：" + path + "\n");
+            assertThat(chunk.imagePath()).isEqualTo(path);
+            assertThat(chunk.type()).isEqualTo(MarkdownDocument.BlockType.IMAGE);
+            assertThat(chunk.estimatedTokens()).isLessThanOrEqualTo(12);
+        });
+    }
 }

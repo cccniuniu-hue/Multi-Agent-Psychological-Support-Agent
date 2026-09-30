@@ -12,8 +12,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mindbridge.agent.config.MindBridgeProperties;
 import com.mindbridge.agent.domain.KnowledgeChunk;
 import com.mindbridge.agent.repository.KnowledgeChunkRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -98,6 +100,47 @@ class KnowledgeServiceEmbeddingTests {
         verify(repository).save(chunkCaptor.capture());
         assertThat(chunkCaptor.getValue().getSectionPath()).isEqualTo("Guide / Sleep");
         assertThat(chunkCaptor.getValue().getContentType()).isEqualTo("PARAGRAPH");
+    }
+
+    @Test
+    void storesImageDescriptionAsAnIndependentRetrievableChunkWithOriginalPath() {
+        String body = "# Report\n![Chart](images/first/chart.png) 图片描述：Score rose";
+        ImageDescription description = new ImageDescription("bar_chart", "Score rose",
+                List.of("Week"), List.of("later week is higher"), List.of("rarepeak"));
+        var described = new DocumentParseResult.ImageReference(
+                "images/first/chart.png", 1, "cG5n", description);
+        var failed = new DocumentParseResult.ImageReference("images/other/chart.png", 2, "cG5n");
+        var parsed = new DocumentParseResult("report.pdf", "Report", body,
+                List.of(new DocumentParseResult.Page(1, body)), List.of(described, failed),
+                new MarkdownDocumentParser().parse(body), DocumentParseResult.Status.SUCCESS, null);
+        List<KnowledgeChunk> saved = new ArrayList<>();
+        AtomicLong ids = new AtomicLong();
+        when(repository.save(org.mockito.ArgumentMatchers.any(KnowledgeChunk.class)))
+                .thenAnswer(invocation -> {
+                    KnowledgeChunk chunk = invocation.getArgument(0);
+                    ReflectionTestUtils.setField(chunk, "id", ids.incrementAndGet());
+                    saved.add(chunk);
+                    return chunk;
+                });
+
+        assertThat(service.ingest(parsed)).isEqualTo(2);
+        assertThat(saved).filteredOn(chunk -> "IMAGE".equals(chunk.getContentType()))
+                .singleElement().satisfies(image -> {
+                    assertThat(image.getSource()).isEqualTo("report.pdf");
+                    assertThat(image.getSourceIndex()).isEqualTo(1);
+                    assertThat(image.getSectionPath()).isEqualTo("Report");
+                    assertThat(image.getImagePath()).isEqualTo(described.path());
+                    assertThat(image.getContent()).contains(described.path(), "Score rose", "Week", "rarepeak")
+                            .doesNotContain("cG5n", failed.path());
+                });
+        when(repository.findAll()).thenReturn(saved);
+        when(reranker.rerank(eq("rarepeak"), anyList(), eq(1)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+
+        assertThat(service.retrieve("rarepeak", 1)).singleElement().satisfies(result -> {
+            assertThat(result.source()).isEqualTo("report.pdf");
+            assertThat(result.content()).contains(described.path(), "rarepeak");
+        });
     }
 
     @Test

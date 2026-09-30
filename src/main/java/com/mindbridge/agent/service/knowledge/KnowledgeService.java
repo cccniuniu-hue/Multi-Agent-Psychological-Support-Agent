@@ -51,23 +51,27 @@ public class KnowledgeService {
 
     @Transactional
     public int ingest(String source, String content) {
-        List<KnowledgeChunker.Chunk> chunks = chunker.chunk(
+        return ingest(source, textChunks(content));
+    }
+
+    private List<KnowledgeChunker.Chunk> textChunks(String content) {
+        return chunker.chunk(
                 content,
                 properties.getKnowledge().getChunkSize(),
                 properties.getKnowledge().getChunkOverlap()).stream()
                 .map(text -> new KnowledgeChunker.Chunk(
                         text, "", MarkdownDocument.BlockType.PARAGRAPH, 0))
                 .toList();
-        return ingest(source, chunks);
     }
 
     @Transactional
     public int ingest(DocumentParseResult parsed) {
-        if (parsed.markdown().blocks().isEmpty()) {
-            return ingest(parsed.source(), parsed.body());
-        }
-        return ingest(parsed.source(), chunker.chunk(
-                parsed.markdown(), properties.getKnowledge().getChunkSize()));
+        List<KnowledgeChunker.Chunk> chunks = new ArrayList<>(parsed.markdown().blocks().isEmpty()
+                ? textChunks(parsed.body())
+                : chunker.chunk(parsed.markdown(), properties.getKnowledge().getChunkSize()));
+        chunks.addAll(chunker.chunkImages(parsed.images(), parsed.markdown(),
+                properties.getKnowledge().getChunkSize()));
+        return ingest(parsed.source(), chunks);
     }
 
     private int ingest(String source, List<KnowledgeChunker.Chunk> chunks) {
@@ -82,6 +86,7 @@ public class KnowledgeService {
             chunk.setContent(parsedChunk.content());
             chunk.setSectionPath(parsedChunk.sectionPath());
             chunk.setContentType(parsedChunk.type().name());
+            chunk.setImagePath(parsedChunk.imagePath());
             // 有 embedding 配置时写入向量；没有配置时保持为空，检索会自动走本地兜底。
             List<Double> embedding = safeEmbedding(parsedChunk.content());
             chunk.setEmbeddingJson(serializeEmbedding(embedding));

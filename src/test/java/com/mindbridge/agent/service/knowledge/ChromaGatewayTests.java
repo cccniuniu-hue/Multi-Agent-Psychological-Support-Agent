@@ -54,6 +54,7 @@ class ChromaGatewayTests {
         chunk.setSource("guide.md");
         chunk.setSourceIndex(3);
         chunk.setContent("支持性倾听与情绪识别");
+        chunk.setImagePath("images/chart.png");
         chunk.setEmbeddingModel("text-embedding-test");
         chunk.setEmbeddingDimensions(3);
         List<Double> embedding = List.of(0.1, 0.2, 0.3);
@@ -79,6 +80,8 @@ class ChromaGatewayTests {
         assertThat(upsertBody.path("embeddings").path(0)).hasSize(3);
         assertThat(upsertBody.path("embeddings").path(0).path(1).asDouble()).isEqualTo(0.2);
         assertThat(upsertBody.path("metadatas").path(0).path("source").asText()).isEqualTo("guide.md");
+        assertThat(upsertBody.path("metadatas").path(0).path("imagePath").asText())
+                .isEqualTo("images/chart.png");
         assertThat(upsertBody.path("metadatas").path(0).path("embeddingModel").asText())
                 .isEqualTo("text-embedding-test");
         assertThat(upsertBody.path("metadatas").path(0).path("embeddingDimensions").asInt()).isEqualTo(3);
