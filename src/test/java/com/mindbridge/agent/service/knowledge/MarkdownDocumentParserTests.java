@@ -86,4 +86,43 @@ class MarkdownDocumentParserTests {
         assertThat(document.blocks().get(1).text())
                 .isEqualTo("```java\nSystem.out.println(\"hello\");\n```");
     }
+
+    @Test
+    void insertsDescriptionAfterExactImageReferencesWithoutChangingOtherMarkdown() {
+        String markdown = """
+                # Charts
+
+                Before ![First](images/first/chart.png "Week") and ![Other](images/other/chart.png).
+
+                | Chart |
+                | --- |
+                | ![Again](images/first/chart.png) |
+
+                ```md
+                ![Example](images/first/chart.png)
+                ```
+                """;
+        ImageDescription description = new ImageDescription("chart", "Peak | [week]\n# two",
+                List.of(), List.of(), List.of());
+        var first = new DocumentParseResult.ImageReference("images/first/chart.png", null, null, description);
+        var failed = new DocumentParseResult.ImageReference("images/other/chart.png", null);
+
+        String enriched = new MarkdownDocumentParser().withImageDescriptions(markdown, List.of(first, failed));
+
+        assertThat(enriched).isEqualTo("""
+                # Charts
+
+                Before ![First](images/first/chart.png "Week") 图片描述：Peak \\| \\[week\\] \\# two and ![Other](images/other/chart.png).
+
+                | Chart |
+                | --- |
+                | ![Again](images/first/chart.png) 图片描述：Peak \\| \\[week\\] \\# two |
+
+                ```md
+                ![Example](images/first/chart.png)
+                ```
+                """);
+        assertThat(new MarkdownDocumentParser().parse(enriched).headings())
+                .containsExactly(new MarkdownDocument.Heading(1, "Charts"));
+    }
 }

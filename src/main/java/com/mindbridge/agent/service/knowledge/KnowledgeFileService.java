@@ -68,7 +68,8 @@ public class KnowledgeFileService {
                             : imageClient.describe(image.path(), image.base64Content())
                                     .map(image::withDescription).orElse(image))
                     .toList();
-            return result.withImages(images).withMarkdown(markdownParser.parse(result.body()));
+            String body = markdownParser.withImageDescriptions(result.body(), images);
+            return result.withImages(images).withBody(body).withMarkdown(markdownParser.parse(body));
         }
         List<DocumentParseResult.Page> pages;
         try {

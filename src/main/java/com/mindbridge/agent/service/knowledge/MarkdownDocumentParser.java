@@ -1,7 +1,11 @@
 package com.mindbridge.agent.service.knowledge;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import org.commonmark.Extension;
 import org.commonmark.ext.gfm.tables.TableBlock;
 import org.commonmark.ext.gfm.tables.TablesExtension;
@@ -16,7 +20,9 @@ import org.commonmark.node.IndentedCodeBlock;
 import org.commonmark.node.Node;
 import org.commonmark.node.Paragraph;
 import org.commonmark.node.SoftLineBreak;
+import org.commonmark.node.SourceSpan;
 import org.commonmark.node.Text;
+import org.commonmark.parser.IncludeSourceSpans;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.markdown.MarkdownRenderer;
 import org.springframework.stereotype.Component;
@@ -26,7 +32,8 @@ import org.springframework.stereotype.Component;
 public class MarkdownDocumentParser {
 
     private final List<Extension> extensions = List.of(TablesExtension.create());
-    private final Parser parser = Parser.builder().extensions(extensions).build();
+    private final Parser parser = Parser.builder().extensions(extensions)
+            .includeSourceSpans(IncludeSourceSpans.BLOCKS_AND_INLINES).build();
     private final MarkdownRenderer markdownRenderer = MarkdownRenderer.builder()
             .extensions(extensions)
             .build();
@@ -38,6 +45,53 @@ public class MarkdownDocumentParser {
         StructureVisitor visitor = new StructureVisitor(markdownRenderer);
         parser.parse(markdown).accept(visitor);
         return visitor.result();
+    }
+
+    public String withImageDescriptions(
+            String markdown, List<DocumentParseResult.ImageReference> images
+    ) {
+        if (markdown == null || markdown.isBlank() || images.isEmpty()) {
+            return markdown;
+        }
+        Map<String, String> descriptions = new HashMap<>();
+        for (DocumentParseResult.ImageReference image : images) {
+            if (image.path() != null && image.description() != null
+                    && image.description().summary() != null && !image.description().summary().isBlank()) {
+                descriptions.put(image.path(), image.description().summary());
+            }
+        }
+        if (descriptions.isEmpty()) {
+            return markdown;
+        }
+        Map<Integer, String> insertions = new TreeMap<>(Comparator.reverseOrder());
+        parser.parse(markdown).accept(new AbstractVisitor() {
+            @Override
+            public void visit(Image image) {
+                String description = descriptions.get(image.getDestination());
+                List<SourceSpan> spans = image.getSourceSpans();
+                if (description != null && !spans.isEmpty()) {
+                    SourceSpan last = spans.get(spans.size() - 1);
+                    int offset = last.getInputIndex() + last.getLength();
+                    if (offset >= 0 && offset <= markdown.length()) {
+                        insertions.put(offset, " 图片描述：" + escapeInline(description));
+                    }
+                }
+            }
+        });
+        StringBuilder result = new StringBuilder(markdown);
+        insertions.forEach(result::insert);
+        return result.toString();
+    }
+
+    private String escapeInline(String description) {
+        StringBuilder result = new StringBuilder();
+        for (char character : description.replaceAll("\\R+", " ").toCharArray()) {
+            if ("\\`*_{}[]()#+-.!|>".indexOf(character) >= 0) {
+                result.append('\\');
+            }
+            result.append(character);
+        }
+        return result.toString();
     }
 
     private static class StructureVisitor extends AbstractVisitor {

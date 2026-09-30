@@ -37,6 +37,10 @@ public record DocumentParseResult(
         return new DocumentParseResult(source, title, body, pages, images, markdown, status, error);
     }
 
+    public DocumentParseResult withBody(String body) {
+        return new DocumentParseResult(source, title, body, pages, images, markdown, status, error);
+    }
+
     public DocumentParseResult withImages(List<ImageReference> images) {
         return new DocumentParseResult(source, title, body, pages, images, markdown, status, error);
     }

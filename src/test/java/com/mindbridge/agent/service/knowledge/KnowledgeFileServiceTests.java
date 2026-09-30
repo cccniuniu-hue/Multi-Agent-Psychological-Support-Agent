@@ -67,6 +67,8 @@ class KnowledgeFileServiceTests {
         var successfulImage = new DocumentParseResult.ImageReference("images/second/chart.png", 2, imageContent);
         var missingImage = new DocumentParseResult.ImageReference("images/missing.png", null);
         var description = new ImageDescription("bar_chart", "Peak score: 8", List.of("Score"), List.of(), List.of("8"));
+        String enrichedBody = body.replace("![Second](images/second/chart.png)",
+                "![Second](images/second/chart.png) 图片描述：Peak score: 8");
         var markerResult = new DocumentParseResult("guide.docx", "guide", body,
                 List.of(new DocumentParseResult.Page(1, body)),
                 List.of(failedImage, successfulImage, missingImage), DocumentParseResult.Status.SUCCESS, null);
@@ -76,17 +78,19 @@ class KnowledgeFileServiceTests {
 
         DocumentParseResult result = fileService.parse("guide.docx", bytes);
 
-        assertThat(result.body()).isEqualTo(body);
+        assertThat(result.body()).isEqualTo(enrichedBody);
         assertThat(result.pages()).isEqualTo(markerResult.pages());
         assertThat(result.images()).containsExactly(failedImage, successfulImage.withDescription(description), missingImage);
         assertThat(result.markdown().images()).extracting(MarkdownDocument.ImageReference::destination)
                 .containsExactly(failedImage.path(), successfulImage.path());
+        assertThat(result.markdown().blocks()).extracting(MarkdownDocument.Block::text)
+                .anySatisfy(text -> assertThat(text).contains("Peak score: 8"));
         assertThat(new ObjectMapper().writeValueAsString(result.images()))
                 .contains("images/second/chart.png", "Peak score: 8").doesNotContain(imageContent, "base64Content");
 
         fileService.ingest("guide.docx", bytes);
         verify(knowledgeService).ingest(argThat(ingested ->
-                description.equals(ingested.images().get(1).description()) && ingested.body().equals(body)));
+                description.equals(ingested.images().get(1).description()) && ingested.body().equals(enrichedBody)));
     }
 
     @Test
