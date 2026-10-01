@@ -439,8 +439,8 @@ flowchart TD
 向量路线优先级：
 
 1. 如果 `USE_CHROMA=true` 且 Chroma 返回结果，直接使用 Chroma 结果。
-2. 如果 Chroma 未启用、不可用或没有结果，则尝试本地 embedding 相似度。
-3. 如果本地 embedding 也不可用，则向量路线为空。
+2. 如果 Chroma 未启用、查询抛错或没有结果，则尝试本地 embedding 相似度。
+3. 如果本地 embedding 也不可用，则向量路线为空，仍继续执行 BM25。
 
 ### 10.4 BM25 路线
 

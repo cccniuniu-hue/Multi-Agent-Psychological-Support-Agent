@@ -179,6 +179,41 @@ class KnowledgeServiceEmbeddingTests {
     }
 
     @Test
+    void usesLocalVectorWhenChromaQueryThrows() {
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        ReflectionTestUtils.setField(chunk, "id", 42L);
+        chunk.setSource("guide.md");
+        chunk.setContent("support answer");
+        chunk.setEmbeddingJson("[0.1,0.2,0.3]");
+        chunk.setEmbeddingModel(MODEL);
+        chunk.setEmbeddingDimensions(3);
+        when(repository.findAll()).thenReturn(List.of(chunk));
+        when(embeddingClient.embed("needle")).thenReturn(EMBEDDING);
+        when(chromaGateway.query(EMBEDDING, MODEL, 50)).thenThrow(new IllegalStateException("Chroma unavailable"));
+        when(reranker.rerank(eq("needle"), anyList(), eq(1)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+
+        assertThat(service.retrieve("needle", 1)).singleElement()
+                .satisfies(result -> assertThat(result.chunkId()).isEqualTo(42L));
+    }
+
+    @Test
+    void usesBm25WhenChromaQueryThrowsAndNoLocalVectorExists() {
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        ReflectionTestUtils.setField(chunk, "id", 43L);
+        chunk.setSource("guide.md");
+        chunk.setContent("needle answer");
+        when(repository.findAll()).thenReturn(List.of(chunk));
+        when(embeddingClient.embed("needle")).thenReturn(EMBEDDING);
+        when(chromaGateway.query(EMBEDDING, MODEL, 50)).thenThrow(new IllegalStateException("Chroma unavailable"));
+        when(reranker.rerank(eq("needle"), anyList(), eq(1)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+
+        assertThat(service.retrieve("needle", 1)).singleElement()
+                .satisfies(result -> assertThat(result.chunkId()).isEqualTo(43L));
+    }
+
+    @Test
     void appliesConfigurableCoarseRecallLimitToBothVectorAndBm25() {
         List<KnowledgeChunk> chunks = new ArrayList<>();
         for (int index = 0; index < 60; index++) {

@@ -125,7 +125,12 @@ public class KnowledgeService {
         if (embeddingModel == null || embeddingModel.isBlank()) {
             return List.of();
         }
-        List<SearchResult> chromaResults = chromaGateway.query(queryEmbedding, embeddingModel, limit);
+        List<SearchResult> chromaResults;
+        try {
+            chromaResults = chromaGateway.query(queryEmbedding, embeddingModel, limit);
+        } catch (RuntimeException ignored) {
+            chromaResults = List.of();
+        }
         if (!chromaResults.isEmpty()) {
             return chromaResults;
         }
