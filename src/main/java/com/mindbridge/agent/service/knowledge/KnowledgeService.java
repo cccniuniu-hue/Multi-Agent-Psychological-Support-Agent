@@ -106,7 +106,8 @@ public class KnowledgeService {
         if (topK <= 0 || query == null || query.isBlank()) {
             return List.of();
         }
-        int candidateLimit = Math.max(Math.max(topK * 4, 20), properties.getKnowledge().getRerankerCandidateLimit());
+        int candidateLimit = Math.max(Math.max(topK, properties.getKnowledge().getCoarseRecallLimit()),
+                properties.getKnowledge().getRerankerCandidateLimit());
         List<KnowledgeChunk> chunks = knowledgeChunkRepository.findAll();
         List<SearchResult> vectorResults = retrieveByVector(query, candidateLimit, chunks);
         List<SearchResult> bm25Results = bm25Scorer.rank(query, chunks, candidateLimit);

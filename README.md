@@ -185,6 +185,7 @@ docker compose down
 | `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | 见配置文件 | 数据库连接 |
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Redis 连接 |
 | `USE_CHROMA` | `true` | 是否使用 Chroma 知识检索 |
+| `RAG_COARSE_RECALL_LIMIT` | `50` | 向量检索和 BM25 各取最多 50 条粗召回候选；最终返回数仍由 `RAG_TOP_K` 控制 |
 | `CHROMA_TENANT` / `CHROMA_DATABASE` | `default_tenant` / `default_database` | Chroma v2 租户和数据库 |
 | `MARKER_ENABLED` | `false` | 是否让管理员 PDF/DOCX 上传优先调用 Marker |
 | `MARKER_BASE_URL` | `http://localhost:8001` | Marker HTTP 服务地址；Compose 内为 `http://marker:8001` |

@@ -30,6 +30,7 @@ class KnowledgeServiceEmbeddingTests {
     private ChromaGateway chromaGateway;
     private EmbeddingClient embeddingClient;
     private KnowledgeReranker reranker;
+    private MindBridgeProperties properties;
     private KnowledgeService service;
 
     @BeforeEach
@@ -38,10 +39,11 @@ class KnowledgeServiceEmbeddingTests {
         chromaGateway = mock(ChromaGateway.class);
         embeddingClient = mock(EmbeddingClient.class);
         reranker = mock(KnowledgeReranker.class);
+        properties = new MindBridgeProperties();
         when(embeddingClient.modelName()).thenReturn(MODEL);
         service = new KnowledgeService(
                 repository,
-                new MindBridgeProperties(),
+                properties,
                 chromaGateway,
                 embeddingClient,
                 reranker,
@@ -165,7 +167,7 @@ class KnowledgeServiceEmbeddingTests {
         when(embeddingClient.embed(query)).thenReturn(EMBEDDING);
         when(repository.findAll()).thenReturn(List.of(staleChunk, chunk));
         when(repository.findById(42L)).thenReturn(Optional.empty());
-        when(chromaGateway.query(EMBEDDING, MODEL, 20)).thenReturn(List.of());
+        when(chromaGateway.query(EMBEDDING, MODEL, 50)).thenReturn(List.of());
         when(reranker.rerank(eq(query), anyList(), eq(1)))
                 .thenAnswer(invocation -> invocation.getArgument(1));
 
@@ -173,6 +175,36 @@ class KnowledgeServiceEmbeddingTests {
                 .satisfies(result -> assertThat(result.chunkId()).isEqualTo(42L));
 
         verify(embeddingClient, times(1)).embed(query);
-        verify(chromaGateway).query(EMBEDDING, MODEL, 20);
+        verify(chromaGateway).query(EMBEDDING, MODEL, 50);
+    }
+
+    @Test
+    void appliesConfigurableCoarseRecallLimitToBothVectorAndBm25() {
+        List<KnowledgeChunk> chunks = new ArrayList<>();
+        for (int index = 0; index < 60; index++) {
+            KnowledgeChunk chunk = new KnowledgeChunk();
+            ReflectionTestUtils.setField(chunk, "id", (long) index + 1);
+            chunk.setSource("guide.md");
+            chunk.setContent("needle " + index);
+            chunks.add(chunk);
+        }
+        when(repository.findAll()).thenReturn(chunks);
+        when(embeddingClient.embed("needle")).thenReturn(EMBEDDING);
+        when(reranker.rerank(eq("needle"), anyList(), eq(1)))
+                .thenAnswer(invocation -> {
+                    List<SearchResult> candidates = invocation.getArgument(1);
+                    return candidates.stream().limit(1).toList();
+                });
+
+        assertThat(service.retrieve("needle", 1)).hasSize(1);
+        verify(chromaGateway).query(EMBEDDING, MODEL, 50);
+        verify(reranker).rerank(eq("needle"), org.mockito.ArgumentMatchers.argThat(
+                candidates -> candidates.size() == 50), eq(1));
+
+        properties.getKnowledge().setCoarseRecallLimit(30);
+        assertThat(service.retrieve("needle", 1)).hasSize(1);
+        verify(chromaGateway).query(EMBEDDING, MODEL, 30);
+        verify(reranker).rerank(eq("needle"), org.mockito.ArgumentMatchers.argThat(
+                candidates -> candidates.size() == 30), eq(1));
     }
 }

@@ -121,6 +121,7 @@ mindbridge:
     dimensions: ${OPENAI_EMBEDDING_DIMENSIONS:512}
   knowledge:
     top-k: ${RAG_TOP_K:4}
+    coarse-recall-limit: ${RAG_COARSE_RECALL_LIMIT:50}
     reranker-enabled: ${RAG_RERANKER_ENABLED:true}
     reranker-candidate-limit: ${RAG_RERANKER_CANDIDATE_LIMIT:20}
     reranker-max-content-chars: ${RAG_RERANKER_MAX_CONTENT_CHARS:700}

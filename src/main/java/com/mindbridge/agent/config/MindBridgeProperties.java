@@ -310,6 +310,8 @@ public class MindBridgeProperties {
     public static class Knowledge {
         /** 每次 RAG 检索返回的候选片段数量。 */
         private int topK = 4;
+        /** 向量检索和 BM25 各自的粗召回候选上限。 */
+        private int coarseRecallLimit = 50;
         /** 是否启用二阶段 reranker。 */
         private boolean rerankerEnabled = true;
         /** 初排后交给 reranker 的最大候选数量。 */
@@ -337,6 +339,14 @@ public class MindBridgeProperties {
 
         public void setTopK(int topK) {
             this.topK = topK;
+        }
+
+        public int getCoarseRecallLimit() {
+            return coarseRecallLimit;
+        }
+
+        public void setCoarseRecallLimit(int coarseRecallLimit) {
+            this.coarseRecallLimit = coarseRecallLimit;
         }
 
         public boolean isRerankerEnabled() {

@@ -410,16 +410,16 @@ KnowledgeService.retrieve(String query, int topK)
 系统不会只取 `topK` 个候选再融合，而是先扩大候选池：
 
 ```java
-candidateLimit = Math.max(topK * 4, 20)
+candidateLimit = max(topK, RAG_COARSE_RECALL_LIMIT, RAG_RERANKER_CANDIDATE_LIMIT)
 ```
 
-默认情况下，即使最终只返回 4 条，也会从向量检索和 BM25 各取最多 20 条候选再融合，减少某一路检索初排不稳定导致的漏召回。
+默认情况下，即使最终只返回 4 条，也会从向量检索和 BM25 各取最多 50 条候选再融合；可通过 `RAG_COARSE_RECALL_LIMIT` 调整。粗召回上限不会低于请求的 `topK` 和 reranker 候选上限，避免提前截断需要的结果。
 
 ### 10.2 检索路线
 
 ```mermaid
 flowchart TD
-    A["KnowledgeService.retrieve(query, topK)"] --> B["candidateLimit = max(topK * 4, 20)"]
+    A["KnowledgeService.retrieve(query, topK)"] --> B["candidateLimit = max(topK, coarseRecallLimit, rerankerCandidateLimit)"]
     B --> C["读取所有 KnowledgeChunk"]
     C --> D["retrieveByVector"]
     D --> E{"Chroma 有结果?"}
