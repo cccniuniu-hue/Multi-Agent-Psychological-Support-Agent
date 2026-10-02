@@ -23,6 +23,7 @@ public class KnowledgeService {
 
     private static final double VECTOR_WEIGHT = 0.65;
     private static final double BM25_WEIGHT = 0.35;
+    private static final int RRF_K = 60;
 
     private final KnowledgeChunkRepository knowledgeChunkRepository;
     private final MindBridgeProperties properties;
@@ -162,13 +163,15 @@ public class KnowledgeService {
             List<SearchResult> bm25Results,
             int topK
     ) {
+        boolean rrf = properties.getKnowledge().getFusionStrategy()
+                == MindBridgeProperties.Knowledge.FusionStrategy.RRF;
         Map<String, HybridCandidate> candidates = new LinkedHashMap<>();
-        double maxVectorScore = maxScore(vectorResults);
-        double maxBm25Score = maxScore(bm25Results);
-        mergeRoute(candidates, vectorResults, maxVectorScore, true);
-        mergeRoute(candidates, bm25Results, maxBm25Score, false);
+        double maxVectorScore = rrf ? 0.0 : maxScore(vectorResults);
+        double maxBm25Score = rrf ? 0.0 : maxScore(bm25Results);
+        mergeRoute(candidates, vectorResults, maxVectorScore, true, rrf);
+        mergeRoute(candidates, bm25Results, maxBm25Score, false, rrf);
         return candidates.values().stream()
-                .map(HybridCandidate::toSearchResult)
+                .map(candidate -> candidate.toSearchResult(rrf))
                 .sorted(Comparator.comparingDouble(SearchResult::score).reversed())
                 .limit(topK)
                 .toList();
@@ -178,16 +181,18 @@ public class KnowledgeService {
             Map<String, HybridCandidate> candidates,
             List<SearchResult> results,
             double maxScore,
-            boolean vectorRoute
+            boolean vectorRoute,
+            boolean rrf
     ) {
-        if (results.isEmpty() || maxScore <= 0.0) {
+        if (results.isEmpty() || (!rrf && maxScore <= 0.0)) {
             return;
         }
         for (int rank = 0; rank < results.size(); rank++) {
             SearchResult result = results.get(rank);
-            double normalizedScore = Math.max(0.0, result.score()) / maxScore;
-            double rankBoost = 1.0 / (rank + 1.0);
-            double routeScore = normalizedScore * 0.85 + rankBoost * 0.15;
+            double routeScore = rrf
+                    ? 1.0 / (RRF_K + rank + 1)
+                    : (Math.max(0.0, result.score()) / maxScore) * 0.85
+                    + (1.0 / (rank + 1.0)) * 0.15;
             HybridCandidate candidate = candidates.computeIfAbsent(candidateKey(result), key -> new HybridCandidate(result));
             if (vectorRoute) {
                 candidate.vectorScore = Math.max(candidate.vectorScore, routeScore);
@@ -313,8 +318,10 @@ public class KnowledgeService {
             this.result = result;
         }
 
-        private SearchResult toSearchResult() {
-            double score = vectorScore * VECTOR_WEIGHT + bm25Score * BM25_WEIGHT;
+        private SearchResult toSearchResult(boolean rrf) {
+            double score = rrf
+                    ? vectorScore + bm25Score
+                    : vectorScore * VECTOR_WEIGHT + bm25Score * BM25_WEIGHT;
             return new SearchResult(result.chunkId(), result.source(), result.content(), score);
         }
     }

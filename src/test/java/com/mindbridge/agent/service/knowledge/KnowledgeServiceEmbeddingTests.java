@@ -242,4 +242,32 @@ class KnowledgeServiceEmbeddingTests {
         verify(reranker).rerank(eq("needle"), org.mockito.ArgumentMatchers.argThat(
                 candidates -> candidates.size() == 30), eq(1));
     }
+
+    @Test
+    void rrfPrefersAChunkFoundByBothRoutesWhileWeightedFusionRemainsAvailable() {
+        KnowledgeChunk keywordChunk = new KnowledgeChunk();
+        ReflectionTestUtils.setField(keywordChunk, "id", 2L);
+        keywordChunk.setSource("guide.md");
+        keywordChunk.setContent("needle answer");
+        when(repository.findAll()).thenReturn(List.of(keywordChunk));
+        when(embeddingClient.embed("needle")).thenReturn(EMBEDDING);
+        when(chromaGateway.query(EMBEDDING, MODEL, 50)).thenReturn(List.of(
+                new SearchResult(1L, "vector.md", "unrelated", 1.0),
+                new SearchResult(2L, "guide.md", "needle answer", 0.0001)));
+        when(reranker.rerank(eq("needle"), anyList(), eq(1)))
+                .thenAnswer(invocation -> {
+                    List<SearchResult> candidates = invocation.getArgument(1);
+                    return candidates.stream().limit(1).toList();
+                });
+
+        assertThat(service.retrieve("needle", 1)).singleElement().satisfies(result -> {
+            assertThat(result.chunkId()).isEqualTo(2L);
+            assertThat(result.score()).isCloseTo(1.0 / 62 + 1.0 / 61,
+                    org.assertj.core.data.Offset.offset(1e-9));
+        });
+
+        properties.getKnowledge().setFusionStrategy(MindBridgeProperties.Knowledge.FusionStrategy.WEIGHTED);
+        assertThat(service.retrieve("needle", 1)).singleElement()
+                .satisfies(result -> assertThat(result.chunkId()).isEqualTo(1L));
+    }
 }

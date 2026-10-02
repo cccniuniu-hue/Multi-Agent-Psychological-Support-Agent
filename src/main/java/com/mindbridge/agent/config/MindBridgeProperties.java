@@ -308,10 +308,16 @@ public class MindBridgeProperties {
     }
 
     public static class Knowledge {
+        public enum FusionStrategy {
+            RRF, WEIGHTED
+        }
+
         /** 每次 RAG 检索返回的候选片段数量。 */
         private int topK = 4;
         /** 向量检索和 BM25 各自的粗召回候选上限。 */
         private int coarseRecallLimit = 50;
+        /** 向量与 BM25 粗召回的融合策略。 */
+        private FusionStrategy fusionStrategy = FusionStrategy.RRF;
         /** 是否启用二阶段 reranker。 */
         private boolean rerankerEnabled = true;
         /** 初排后交给 reranker 的最大候选数量。 */
@@ -347,6 +353,14 @@ public class MindBridgeProperties {
 
         public void setCoarseRecallLimit(int coarseRecallLimit) {
             this.coarseRecallLimit = coarseRecallLimit;
+        }
+
+        public FusionStrategy getFusionStrategy() {
+            return fusionStrategy;
+        }
+
+        public void setFusionStrategy(FusionStrategy fusionStrategy) {
+            this.fusionStrategy = fusionStrategy;
         }
 
         public boolean isRerankerEnabled() {
