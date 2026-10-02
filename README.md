@@ -1,4 +1,4 @@
-# 多agent心理护航智能体
+# Multi-Agent-Psychological-Support-Agent
 
 
 
@@ -65,10 +65,10 @@ MemoryAgent
 | DeepSeek API Key | 外接聊天模型 | 默认聊天模式必需 |
 | Docker / Docker Compose | 启动 MySQL、Redis、Chroma 和 Mailpit | 仅容器部署时必需 |
 
-先进入项目根目录：
+先进入项目根目录（目录名以实际克隆位置为准）：
 
 ```bash
-cd /path/to/MindBridge
+cd /path/to/Multi-Agent-Psychological-Support-Agent
 ```
 
 可用下列命令检查本地环境：
@@ -135,7 +135,7 @@ Compose 包含以下服务；Marker 使用独立 profile，按需启动：
 
 | 服务 | 端口 | 说明 |
 | --- | --- | --- |
-| MindBridge | `8080` | Web 界面与 API |
+| Multi-Agent-Psychological-Support-Agent | `8080` | Web 界面与 API |
 | MySQL | `3306` | 业务数据 |
 | Redis | `6379` | 短期会话记忆 |
 | Chroma | `8000` | 知识库和用户画像向量检索 |
@@ -328,7 +328,7 @@ DeepSeek 这里只提供聊天能力。知识库 Embedding 仍由 `OPENAI_API_KE
 ## 接入 OpenAI
 
 ```bash
-cd MindBridge
+cd /path/to/Multi-Agent-Psychological-Support-Agent
 AI_PROVIDER=openai \
 OPENAI_API_KEY=你的_API_Key \
 OPENAI_MODEL=gpt-4o-mini \
