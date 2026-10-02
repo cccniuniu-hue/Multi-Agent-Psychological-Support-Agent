@@ -3,6 +3,7 @@ package com.mindbridge.agent.service.knowledge.eval;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.mindbridge.agent.config.MindBridgeProperties;
 import com.mindbridge.agent.domain.IntentType;
 import com.mindbridge.agent.domain.RiskLevel;
 import com.mindbridge.agent.service.IntentClassifier;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
 public class RagEvaluationService {
 
     private final KnowledgeService knowledgeService;
+    private final MindBridgeProperties properties;
     private final AiClient aiClient;
     private final IntentClassifier intentClassifier;
     private final PsychologicalAssessmentService assessmentService;
@@ -34,12 +36,14 @@ public class RagEvaluationService {
 
     public RagEvaluationService(
             KnowledgeService knowledgeService,
+            MindBridgeProperties properties,
             AiClient aiClient,
             IntentClassifier intentClassifier,
             PsychologicalAssessmentService assessmentService,
             ObjectMapper objectMapper
     ) {
         this.knowledgeService = knowledgeService;
+        this.properties = properties;
         this.aiClient = aiClient;
         this.intentClassifier = intentClassifier;
         this.assessmentService = assessmentService;
@@ -57,6 +61,7 @@ public class RagEvaluationService {
         return new RagEvalReport(
                 Instant.now(),
                 datasetLocation,
+                properties.getKnowledge().getFusionStrategy().name(),
                 topK,
                 results.size(),
                 passedCases,
@@ -86,6 +91,7 @@ public class RagEvaluationService {
         return """
                 RAGAS input report completed.
                 dataset=%s
+                fusionStrategy=%s
                 cases=%d
                 passed=%d
                 failed=%d
@@ -94,6 +100,7 @@ public class RagEvaluationService {
                 output contains Java harness assertions; run eval/run-ragas-eval.py for optional RAGAS scores.
                 """.formatted(
                 report.dataset(),
+                report.fusionStrategy(),
                 report.totalCases(),
                 report.passedCases(),
                 report.failedCases(),

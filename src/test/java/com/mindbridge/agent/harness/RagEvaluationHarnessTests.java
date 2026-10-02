@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mindbridge.agent.config.MindBridgeProperties;
 import com.mindbridge.agent.service.IntentClassifier;
 import com.mindbridge.agent.service.PsychologicalAssessmentService;
 import com.mindbridge.agent.service.knowledge.KnowledgeService;
@@ -21,9 +22,11 @@ import org.junit.jupiter.api.Test;
 class RagEvaluationHarnessTests {
 
     private RagEvaluationService evaluationService;
+    private MindBridgeProperties properties;
 
     @BeforeEach
     void setUp() {
+        properties = new MindBridgeProperties();
         ScriptedAiClient aiClient = new ScriptedAiClient();
         KnowledgeService knowledgeService = mock(KnowledgeService.class);
         when(knowledgeService.retrieve(anyString(), anyInt())).thenAnswer(invocation -> {
@@ -44,6 +47,7 @@ class RagEvaluationHarnessTests {
 
         evaluationService = new RagEvaluationService(
                 knowledgeService,
+                properties,
                 aiClient,
                 new IntentClassifier(aiClient),
                 new PsychologicalAssessmentService(aiClient, new ObjectMapper()),
@@ -78,5 +82,16 @@ class RagEvaluationHarnessTests {
         assertThat(report.cases())
                 .extracting(RagEndToEndCaseResult::expectedIntent)
                 .containsExactly("RISK", "CONSULT");
+    }
+
+    @Test
+    void recordsFusionStrategyForComparableEvaluationRuns() {
+        RagEvalReport rrf = evaluationService.evaluate("classpath:harness/rag-harness-scenarios.json", 2);
+        assertThat(rrf.fusionStrategy()).isEqualTo("RRF");
+        assertThat(evaluationService.formatSummary(rrf)).contains("fusionStrategy=RRF");
+
+        properties.getKnowledge().setFusionStrategy(MindBridgeProperties.Knowledge.FusionStrategy.WEIGHTED);
+        RagEvalReport weighted = evaluationService.evaluate("classpath:harness/rag-harness-scenarios.json", 2);
+        assertThat(weighted.fusionStrategy()).isEqualTo("WEIGHTED");
     }
 }

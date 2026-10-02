@@ -446,9 +446,11 @@ flowchart TD
 
 BM25 总会在本地数据库中的所有 chunk 上执行。只要知识库中有文本，BM25 就能提供候选。
 
-### 10.5 分数归一化与融合
+### 10.5 RRF 与可选加权融合
 
-向量分数和 BM25 分数不在同一尺度上，因此项目先在每一路内部归一化，再加入 rank boost。
+默认使用 RRF（Reciprocal Rank Fusion）：向量和 BM25 各自按排名贡献 `1 / (60 + rank)`，`rank` 从 1 开始。同一 chunk 在两路命中时按 ID 去重并累加贡献，不依赖两路原始分数的尺度。
+
+设置 `RAG_FUSION_STRATEGY=weighted` 可使用原有加权融合：先在每一路内部归一化，再加入 rank boost。
 
 对某一路结果：
 
@@ -458,7 +460,7 @@ rankBoost = 1 / (rank + 1)
 routeScore = normalizedScore * 0.85 + rankBoost * 0.15
 ```
 
-最终融合：
+加权融合：
 
 ```text
 finalScore = vectorScore * 0.65 + bm25Score * 0.35
@@ -471,7 +473,7 @@ private static final double VECTOR_WEIGHT = 0.65;
 private static final double BM25_WEIGHT = 0.35;
 ```
 
-这个配比体现了项目的偏好：
+加权策略的配比体现了项目的偏好：
 
 - 向量检索更适合心理表达的语义相似，例如“撑不住”“没有希望”“想消失”。
 - BM25 更适合精确术语和规则命中，例如“心理中心”“辅导员”“自伤”“睡眠”。
@@ -737,6 +739,8 @@ Chroma 查询同时过滤当前账号的 `userId`、画像 embedding 模型和�
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `RAG_TOP_K` | `4` | 最终返回给回答 prompt 的检索结果数量 |
+| `RAG_COARSE_RECALL_LIMIT` | `50` | 向量与 BM25 各自的粗召回候选上限 |
+| `RAG_FUSION_STRATEGY` | `rrf` | `rrf` 或 `weighted`；按评测结果选择 |
 | `USE_CHROMA` | `true` | 是否启用 Chroma 知识库索引 |
 | `CHROMA_BASE_URL` | `http://localhost:8000` | Chroma 服务地址 |
 | `CHROMA_COLLECTION` | `mindbridge_knowledge` | 知识库 collection |
@@ -779,6 +783,8 @@ Chroma 查询同时过滤当前账号的 `userId`、画像 embedding 模型和�
 | `RAG_EVAL_TOP_K` | `4` | 评测检索 topK |
 | `RAG_EVAL_EXIT_AFTER_RUN` | `false` | 报告生成后是否退出应用 |
 | `RAG_EVAL_OUTPUT_PATH` | `target/rag-eval-report.json` | Java 端报告输出 |
+
+比较两种融合策略时，固定同一数据集、知识库快照及 `RAG_EVAL_TOP_K`，分别用 `RAG_FUSION_STRATEGY=rrf` 和 `RAG_FUSION_STRATEGY=weighted` 运行评测，并设置不同的 `RAG_EVAL_OUTPUT_PATH` 避免覆盖。报告会记录 `fusionStrategy`；比较通过数、命中来源、上下文及可选 RAGAS 指标后再选择策略。
 
 ## 17. 部署形态
 

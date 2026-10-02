@@ -186,6 +186,7 @@ docker compose down
 | `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | Redis 连接 |
 | `USE_CHROMA` | `true` | 是否使用 Chroma 知识检索 |
 | `RAG_COARSE_RECALL_LIMIT` | `50` | 向量检索和 BM25 各取最多 50 条粗召回候选；最终返回数仍由 `RAG_TOP_K` 控制 |
+| `RAG_FUSION_STRATEGY` | `rrf` | 粗召回融合策略；`rrf` 按名次融合，`weighted` 使用原有加权分数 |
 | `CHROMA_TENANT` / `CHROMA_DATABASE` | `default_tenant` / `default_database` | Chroma v2 租户和数据库 |
 | `MARKER_ENABLED` | `false` | 是否让管理员 PDF/DOCX 上传优先调用 Marker |
 | `MARKER_BASE_URL` | `http://localhost:8001` | Marker HTTP 服务地址；Compose 内为 `http://marker:8001` |
@@ -426,6 +427,8 @@ JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
 默认评测集包含 100 条人工整理样本，覆盖全部 9 个内置知识主题，并按风险分层为 45 条 LOW、40 条 MEDIUM、15 条 HIGH。完整运行会对每条样本执行检索和回答生成，因此相比早期 10 条 smoke set 会消耗更多模型调用时间；调试链路时可通过 `RAG_EVAL_DATASET` 指向更小的自定义数据集。
 
 默认 Java 输入报告：`target/rag-eval-report.json`
+
+比较融合策略时，对同一数据集、知识库快照和 `RAG_EVAL_TOP_K` 分别运行上述评测命令：一次设置 `RAG_FUSION_STRATEGY=rrf`、`RAG_EVAL_OUTPUT_PATH=target/rag-eval-rrf.json`；另一次设置 `RAG_FUSION_STRATEGY=weighted`、`RAG_EVAL_OUTPUT_PATH=target/rag-eval-weighted.json`。报告中的 `fusionStrategy` 记录实际策略；对比 `passedCases`、检索来源和上下文，再按需分别运行 RAGAS 评估。未执行评测前不预设哪种策略更好。
 
 评测集中的每条样本包含：
 

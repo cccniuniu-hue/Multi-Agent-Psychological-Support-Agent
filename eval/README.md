@@ -2,6 +2,8 @@
 
 This directory contains optional Python tooling for RAGAS evaluation. The Java application does not depend on RAGAS; it only exports `target/rag-eval-report.json`.
 
+To compare fusion strategies, run the Java evaluation twice on the same dataset and knowledge snapshot: once with `RAG_FUSION_STRATEGY=rrf` and `RAG_EVAL_OUTPUT_PATH=target/rag-eval-rrf.json`, then with `RAG_FUSION_STRATEGY=weighted` and `RAG_EVAL_OUTPUT_PATH=target/rag-eval-weighted.json`. Each report records `fusionStrategy`; compare retrieval results and optionally pass each report to the RAGAS command below.
+
 Run from the repository root:
 
 ```bash
