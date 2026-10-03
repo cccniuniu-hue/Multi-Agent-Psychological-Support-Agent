@@ -131,7 +131,7 @@ java -jar target/mindbridge-agent-0.1.0.jar \
 
 ### 4. Docker Compose 完整部署
 
-Compose 包含以下服务；Marker 使用独立 profile，按需启动：
+Compose 包含以下服务；Marker、Qwen2-VL 和 BGE Reranker 使用独立 profile，按需启动：
 
 | 服务 | 端口 | 说明 |
 | --- | --- | --- |
@@ -140,6 +140,7 @@ Compose 包含以下服务；Marker 使用独立 profile，按需启动：
 | Redis | `6379` | 短期会话记忆 |
 | Chroma | `8000` | 知识库和用户画像向量检索 |
 | Marker | `127.0.0.1:8001` | PDF/DOCX 转 Markdown，返回图片清单与内容 |
+| BGE Reranker | `127.0.0.1:8003` | 对 query 与多条候选文本批量评分；Java 接入将在下一步完成 |
 | Mailpit | `1025` / `8025` | SMTP 测试服务 / 管理页面 |
 
 Docker Compose 会将 `DEEPSEEK_API_KEY` 注入应用容器。可复制 `.env.example` 为 `.env`，填入真实密钥；`.env` 已被 Git 忽略。对话内容会发往外部 DeepSeek 服务，处理真实心理咨询数据前应明确告知使用者并确认数据处理安排。
@@ -318,6 +319,10 @@ docker compose --profile marker --profile vision up -d --build app marker qwen2v
 Java 客户端读取 Marker 返回的 Base64 图片内容，按 PNG、JPEG 或 WebP 上传，并将结构化描述关联到解析结果中的原图片相对路径。即使不同目录的图片文件名相同，仍分别保留原路径和描述。单张图片超时、格式不支持、内容无效或服务失败时跳过描述，继续解析正文和其他图片。Marker 响应的读取上限为 32MiB；图片内容仅在解析过程中使用，不输出到解析结果的 JSON 中。
 
 成功的图片描述会回填到 Markdown 原图片引用之后，并生成独立的 `IMAGE` 知识块；每块记录原文档 source、原图片相对路径和章节，长描述切分时每块重复原图路径。描述失败的图片保持原引用，不生成图片块。图片块与普通文本块一样写入数据库，并按现有配置参与关键词或向量检索；Base64 图片内容不会写入知识块。直接上传 Markdown 中的外部图片链接或本地文件路径不会触发下载。图片描述服务独立于默认 DeepSeek 聊天模型及知识库 Embedding 配置。
+
+### BGE Reranker 批量评分服务
+
+可选服务使用 `BAAI/bge-reranker-v2-m3` 对一条 query 和最多 50 条候选文本批量评分。使用 `docker compose --profile reranker up -d reranker` 单独启动；请求、响应和错误码见 [服务契约](services/reranker/README.md)。目前 Java 检索链路仍使用原有 reranker，BGE 客户端将在下一步接入。
 
 ## 接入 DeepSeek API
 

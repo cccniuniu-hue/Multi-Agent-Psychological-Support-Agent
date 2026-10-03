@@ -106,6 +106,18 @@ services:
     ports:
       - "127.0.0.1:8002:8002"
 
+  reranker:
+    profiles: [reranker]
+    build: ./services/reranker
+    image: mindbridge-bge-reranker:2.0.0
+    container_name: mindbridge-bge-reranker
+    environment:
+      BGE_RERANKER_MODEL: ${BGE_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
+      BGE_RERANKER_MAX_CANDIDATES: ${BGE_RERANKER_MAX_CANDIDATES:-50}
+      BGE_RERANKER_TIMEOUT_SECONDS: ${BGE_RERANKER_TIMEOUT_SECONDS:-30}
+    ports:
+      - "127.0.0.1:8003:8003"
+
   mailpit:
     image: axllent/mailpit:latest
     container_name: mindbridge-mailpit
