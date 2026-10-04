@@ -324,6 +324,8 @@ public class MindBridgeProperties {
         private int rerankerCandidateLimit = 20;
         /** 送入 reranker 的单个 chunk 最大字符数，避免 prompt 过长。 */
         private int rerankerMaxContentChars = 700;
+        private String rerankerBaseUrl = "http://localhost:8003";
+        private int rerankerTimeoutSeconds = 35;
         /** 是否启用外部 Chroma 向量库。 */
         private boolean useChroma;
         private String chromaBaseUrl = "http://localhost:8000";
@@ -385,6 +387,22 @@ public class MindBridgeProperties {
 
         public void setRerankerMaxContentChars(int rerankerMaxContentChars) {
             this.rerankerMaxContentChars = rerankerMaxContentChars;
+        }
+
+        public String getRerankerBaseUrl() {
+            return rerankerBaseUrl;
+        }
+
+        public void setRerankerBaseUrl(String rerankerBaseUrl) {
+            this.rerankerBaseUrl = rerankerBaseUrl;
+        }
+
+        public int getRerankerTimeoutSeconds() {
+            return rerankerTimeoutSeconds;
+        }
+
+        public void setRerankerTimeoutSeconds(int rerankerTimeoutSeconds) {
+            this.rerankerTimeoutSeconds = rerankerTimeoutSeconds;
         }
 
         public boolean isUseChroma() {
