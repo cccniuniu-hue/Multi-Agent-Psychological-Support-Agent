@@ -126,6 +126,8 @@ mindbridge:
     reranker-enabled: ${RAG_RERANKER_ENABLED:true}
     reranker-candidate-limit: ${RAG_RERANKER_CANDIDATE_LIMIT:20}
     reranker-max-content-chars: ${RAG_RERANKER_MAX_CONTENT_CHARS:700}
+    reranker-base-url: ${RAG_RERANKER_BASE_URL:http://localhost:8003}
+    reranker-timeout-seconds: ${RAG_RERANKER_CLIENT_TIMEOUT_SECONDS:35}
     use-chroma: ${USE_CHROMA:true}
     chroma-base-url: ${CHROMA_BASE_URL:http://localhost:8000}
     chroma-tenant: ${CHROMA_TENANT:default_tenant}
