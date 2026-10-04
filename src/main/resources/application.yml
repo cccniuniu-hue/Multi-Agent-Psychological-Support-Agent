@@ -120,11 +120,11 @@ mindbridge:
     model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
     dimensions: ${OPENAI_EMBEDDING_DIMENSIONS:512}
   knowledge:
-    top-k: ${RAG_TOP_K:4}
+    top-k: ${RAG_TOP_K:5}
     coarse-recall-limit: ${RAG_COARSE_RECALL_LIMIT:50}
     fusion-strategy: ${RAG_FUSION_STRATEGY:rrf}
     reranker-enabled: ${RAG_RERANKER_ENABLED:true}
-    reranker-candidate-limit: ${RAG_RERANKER_CANDIDATE_LIMIT:20}
+    reranker-candidate-limit: ${RAG_RERANKER_CANDIDATE_LIMIT:50}
     reranker-max-content-chars: ${RAG_RERANKER_MAX_CONTENT_CHARS:700}
     reranker-base-url: ${RAG_RERANKER_BASE_URL:http://localhost:8003}
     reranker-timeout-seconds: ${RAG_RERANKER_CLIENT_TIMEOUT_SECONDS:35}

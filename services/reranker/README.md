@@ -1,6 +1,6 @@
 # BGE Reranker HTTP service
 
-This optional service uses [BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) through FlagEmbedding. Start it with `docker compose --profile reranker up -d reranker`. The model is loaded on the first scoring request. The Java retrieval client is scheduled for the next implementation step.
+This optional service uses [BAAI/bge-reranker-v2-m3](https://huggingface.co/BAAI/bge-reranker-v2-m3) through FlagEmbedding. Start it with `docker compose --profile reranker up -d reranker`. The model is loaded on the first scoring request. The Java retrieval client batches up to 50 fused candidates, selects the five highest raw scores, and falls back to the initial top five when this service fails.
 
 `POST /rerank` accepts one query and 1–50 passages, each at most 4000 characters:
 
