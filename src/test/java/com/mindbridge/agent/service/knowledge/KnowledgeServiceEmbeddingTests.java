@@ -237,6 +237,7 @@ class KnowledgeServiceEmbeddingTests {
                 candidates -> candidates.size() == 50), eq(1));
 
         properties.getKnowledge().setCoarseRecallLimit(30);
+        properties.getKnowledge().setRerankerCandidateLimit(30);
         assertThat(service.retrieve("needle", 1)).hasSize(1);
         verify(chromaGateway).query(EMBEDDING, MODEL, 30);
         verify(reranker).rerank(eq("needle"), org.mockito.ArgumentMatchers.argThat(

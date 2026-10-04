@@ -313,7 +313,7 @@ public class MindBridgeProperties {
         }
 
         /** 每次 RAG 检索返回的候选片段数量。 */
-        private int topK = 4;
+        private int topK = 5;
         /** 向量检索和 BM25 各自的粗召回候选上限。 */
         private int coarseRecallLimit = 50;
         /** 向量与 BM25 粗召回的融合策略。 */
@@ -321,8 +321,8 @@ public class MindBridgeProperties {
         /** 是否启用二阶段 reranker。 */
         private boolean rerankerEnabled = true;
         /** 初排后交给 reranker 的最大候选数量。 */
-        private int rerankerCandidateLimit = 20;
-        /** 送入 reranker 的单个 chunk 最大字符数，避免 prompt 过长。 */
+        private int rerankerCandidateLimit = 50;
+        /** 送入 reranker 的单个 chunk 最大字符数。 */
         private int rerankerMaxContentChars = 700;
         private String rerankerBaseUrl = "http://localhost:8003";
         private int rerankerTimeoutSeconds = 35;

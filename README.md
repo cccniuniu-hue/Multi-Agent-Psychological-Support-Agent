@@ -188,6 +188,11 @@ docker compose down
 | `USE_CHROMA` | `true` | 是否使用 Chroma 知识检索 |
 | `RAG_COARSE_RECALL_LIMIT` | `50` | 向量检索和 BM25 各取最多 50 条粗召回候选；最终返回数仍由 `RAG_TOP_K` 控制 |
 | `RAG_FUSION_STRATEGY` | `rrf` | 粗召回融合策略；`rrf` 按名次融合，`weighted` 使用原有加权分数 |
+| `RAG_TOP_K` | `5` | 重排后返回的知识片段数 |
+| `RAG_RERANKER_ENABLED` | `true` | 是否请求 BGE 批量评分服务；不可用时退回初排顺序 |
+| `RAG_RERANKER_CANDIDATE_LIMIT` | `50` | 送入 BGE 的初排候选数，上限 50 |
+| `RAG_RERANKER_BASE_URL` | `http://localhost:8003` | BGE 服务地址；Compose 内默认 `http://reranker:8003` |
+| `RAG_RERANKER_CLIENT_TIMEOUT_SECONDS` | `35` | Java 客户端等待 BGE 评分的超时秒数 |
 | `CHROMA_TENANT` / `CHROMA_DATABASE` | `default_tenant` / `default_database` | Chroma v2 租户和数据库 |
 | `MARKER_ENABLED` | `false` | 是否让管理员 PDF/DOCX 上传优先调用 Marker |
 | `MARKER_BASE_URL` | `http://localhost:8001` | Marker HTTP 服务地址；Compose 内为 `http://marker:8001` |
@@ -322,7 +327,7 @@ Java 客户端读取 Marker 返回的 Base64 图片内容，按 PNG、JPEG 或 W
 
 ### BGE Reranker 批量评分服务
 
-可选服务使用 `BAAI/bge-reranker-v2-m3` 对一条 query 和最多 50 条候选文本批量评分。使用 `docker compose --profile reranker up -d reranker` 单独启动；请求、响应和错误码见 [服务契约](services/reranker/README.md)。目前 Java 检索链路仍使用原有 reranker，BGE 客户端将在下一步接入。
+可选服务使用 `BAAI/bge-reranker-v2-m3` 对一条 query 和最多 50 条候选文本批量评分。使用 `docker compose --profile reranker up -d reranker` 单独启动；请求、响应和错误码见 [服务契约](services/reranker/README.md)。Java 检索链路将向量与 BM25 候选融合后取 Top50 交给 BGE，按原始相关性分数选出 Top5；服务超时、报错或响应不完整时退回初排 Top5。未启动可选服务时也会走这一降级路径。
 
 ## 接入 DeepSeek API
 
