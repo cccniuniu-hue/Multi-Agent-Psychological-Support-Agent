@@ -6,8 +6,11 @@ import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
 import com.mindbridge.agent.service.knowledge.KnowledgeService;
 import com.mindbridge.agent.service.knowledge.SearchResult;
+import java.time.Duration;
 import java.util.List;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 知识库 Agent。
@@ -16,6 +19,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class KnowledgeAgent implements MindBridgeAgent {
+
+    private static final Duration QUERY_REWRITE_TIMEOUT = Duration.ofSeconds(3);
 
     private final KnowledgeService knowledgeService;
     private final MindBridgeProperties properties;
@@ -81,8 +86,7 @@ public class KnowledgeAgent implements MindBridgeAgent {
     }
 
     private String rewriteQuery(AgentContext context) {
-        try {
-            String query = aiClient.complete(List.of(
+        return completeQueryRewrite(List.of(
                     AiMessage.system("""
                             你是 MindBridge 的 KnowledgeAgent。
                             你的任务是把学生输入改写成适合检索校园心理知识库的中文查询词。
@@ -96,11 +100,7 @@ public class KnowledgeAgent implements MindBridgeAgent {
                             当前输入：
                             %s
                             """.formatted(context.memoryBrief(), context.modelInput()))
-            )).trim();
-            return normalizeQuery(query, context.modelInput());
-        } catch (Exception ignored) {
-            return context.modelInput();
-        }
+            ), context.modelInput());
     }
 
     private boolean isKnowledgeEnough(AgentContext context, List<SearchResult> results) {
@@ -129,8 +129,7 @@ public class KnowledgeAgent implements MindBridgeAgent {
     }
 
     private String refineQuery(AgentContext context, String previousQuery, List<SearchResult> results) {
-        try {
-            String query = aiClient.complete(List.of(
+        return completeQueryRewrite(List.of(
                     AiMessage.system("""
                             你是 MindBridge 的 KnowledgeAgent。
                             上一次检索信息不足，请给出一个新的、更具体的中文检索 query。
@@ -146,10 +145,18 @@ public class KnowledgeAgent implements MindBridgeAgent {
                             上一次结果：
                             %s
                             """.formatted(context.modelInput(), previousQuery, formatResults(results)))
-            )).trim();
-            return normalizeQuery(query, previousQuery);
-        } catch (Exception ignored) {
-            return previousQuery;
+            ), previousQuery);
+    }
+
+    private String completeQueryRewrite(List<AiMessage> messages, String fallback) {
+        try {
+            // ponytail: this bounds waiting; a non-interruptible upstream request may finish later.
+            String answer = Mono.fromCallable(() -> aiClient.complete(messages))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .block(QUERY_REWRITE_TIMEOUT);
+            return normalizeQuery(answer, fallback);
+        } catch (RuntimeException ignored) {
+            return fallback;
         }
     }
 
@@ -164,15 +171,17 @@ public class KnowledgeAgent implements MindBridgeAgent {
     }
 
     private String normalizeQuery(String value, String fallback) {
+        if (value == null || value.contains("\n") || value.contains("\r")) {
+            return fallback;
+        }
         String query = value
                 .replace("查询词：", "")
                 .replace("query:", "")
                 .replace("Query:", "")
-                .replaceAll("[\\r\\n]+", " ")
                 .trim();
-        if (query.isBlank()) {
+        if (query.isBlank() || query.length() > 40) {
             return fallback;
         }
-        return query.length() > 60 ? query.substring(0, 60) : query;
+        return query;
     }
 }

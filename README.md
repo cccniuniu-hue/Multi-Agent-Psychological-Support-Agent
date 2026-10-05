@@ -47,7 +47,7 @@ MemoryAgent
 
 - `MemoryAgent`：读取 Redis 短期记忆，并用当前输入从 Chroma 召回相关用户画像；Redis 为空时从 MySQL 长期聊天记录恢复。
 - `SupervisorAgent`：调用模型判断 `CHAT / CONSULT / RISK`，决定后续交给普通陪伴还是心理支持链路。
-- `KnowledgeAgent`：调用模型改写 Chroma/RAG 检索 query，并判断检索结果是否足够，不足时二次检索。
+- `KnowledgeAgent`：简短咨询和风险输入直接用原问题检索；复杂咨询才尝试附加改写词，并判断检索结果是否足够。
 - `RiskGuardianAgent`：调用模型做后台心理状态评估，同时保留高风险词库硬兜底。
 - `CompanionAgent`：调用模型生成普通聊天回复策略，并组装普通助手回复 prompt。
 - `CounselorAgent`：调用模型生成心理支持回复策略，并结合记忆、RAG、风险守护结果组装回复 prompt。
@@ -140,7 +140,7 @@ Compose 包含以下服务；Marker、Qwen2-VL 和 BGE Reranker 使用独立 pro
 | Redis | `6379` | 短期会话记忆 |
 | Chroma | `8000` | 知识库和用户画像向量检索 |
 | Marker | `127.0.0.1:8001` | PDF/DOCX 转 Markdown，返回图片清单与内容 |
-| BGE Reranker | `127.0.0.1:8003` | 对 query 与多条候选文本批量评分；Java 接入将在下一步完成 |
+| BGE Reranker | `127.0.0.1:8003` | 对 query 与多条候选文本批量评分；服务异常时 Java 退回初排结果 |
 | Mailpit | `1025` / `8025` | SMTP 测试服务 / 管理页面 |
 
 Docker Compose 会将 `DEEPSEEK_API_KEY` 注入应用容器。可复制 `.env.example` 为 `.env`，填入真实密钥；`.env` 已被 Git 忽略。对话内容会发往外部 DeepSeek 服务，处理真实心理咨询数据前应明确告知使用者并确认数据处理安排。
@@ -328,6 +328,8 @@ Java 客户端读取 Marker 返回的 Base64 图片内容，按 PNG、JPEG 或 W
 ### BGE Reranker 批量评分服务
 
 可选服务使用 `BAAI/bge-reranker-v2-m3` 对一条 query 和最多 50 条候选文本批量评分。使用 `docker compose --profile reranker up -d reranker` 单独启动；请求、响应和错误码见 [服务契约](services/reranker/README.md)。Java 检索链路将向量与 BM25 候选融合后取 Top50 交给 BGE，按原始相关性分数选出 Top5；服务超时、报错或响应不完整时退回初排 Top5。未启动可选服务时也会走这一降级路径。
+
+检索 query 默认保留用户原问题。只有较长且包含多个分句的咨询输入才请求模型补充检索词；改写词必须是单行且不超过 40 字，超过 3 秒或返回无效内容时仅使用原问题。
 
 ## 接入 DeepSeek API
 

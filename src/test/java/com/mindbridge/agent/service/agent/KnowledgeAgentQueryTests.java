@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +17,7 @@ import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
 import com.mindbridge.agent.service.knowledge.KnowledgeService;
 import com.mindbridge.agent.service.knowledge.SearchResult;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +52,45 @@ class KnowledgeAgentQueryTests {
         verify(fixture.knowledgeService).retrieve(expected, 5);
         assertThat(context.knowledgeQuery()).isEqualTo(expected);
         assertThat(fixture.rewriteCalls).isEqualTo(1);
+    }
+
+    @Test
+    void rejectsOverlongOrMultilineRewrite() {
+        String question = "最近几周我既焦虑又睡不着，考试压力也很大，和室友相处一直紧张，想知道能如何调整以及到哪里求助。";
+        for (String modelOutput : List.of("焦虑".repeat(30), "焦虑睡眠\n这是解释")) {
+            Fixture fixture = new Fixture();
+            doAnswer(invocation -> {
+                List<AiMessage> messages = invocation.getArgument(0);
+                return messages.get(0).content().contains("改写成适合检索")
+                        ? modelOutput : "SUFFICIENT";
+            }).when(fixture.aiClient).complete(anyList());
+
+            AgentContext context = fixture.context(IntentType.CONSULT, question);
+            fixture.agent.act(context);
+
+            verify(fixture.knowledgeService).retrieve(question, 5);
+            assertThat(context.knowledgeQuery()).isEqualTo(question);
+        }
+    }
+
+    @Test
+    void timesOutSlowRewriteAndUsesOriginalQuestion() {
+        String question = "最近几周我既焦虑又睡不着，考试压力也很大，和室友相处一直紧张，想知道能如何调整以及到哪里求助。";
+        Fixture fixture = new Fixture();
+        doAnswer(invocation -> {
+            List<AiMessage> messages = invocation.getArgument(0);
+            if (messages.get(0).content().contains("改写成适合检索")) {
+                Thread.sleep(5000);
+                return "迟到的检索词";
+            }
+            return "SUFFICIENT";
+        }).when(fixture.aiClient).complete(anyList());
+
+        long start = System.nanoTime();
+        fixture.agent.act(fixture.context(IntentType.CONSULT, question));
+
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(4500));
+        verify(fixture.knowledgeService).retrieve(question, 5);
     }
 
     private static class Fixture {
