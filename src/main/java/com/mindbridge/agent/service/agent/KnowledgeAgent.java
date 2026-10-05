@@ -41,11 +41,13 @@ public class KnowledgeAgent implements MindBridgeAgent {
 
     @Override
     public AgentDecision act(AgentContext context) {
-        String query = rewriteQuery(context);
+        String original = context.modelInput();
+        boolean complexConsultation = isComplexConsultation(context);
+        String query = complexConsultation ? keepOriginal(original, rewriteQuery(context)) : original;
         List<SearchResult> retrieved = knowledgeService.retrieve(query, properties.getKnowledge().getTopK());
         String observation = "query=%s; retrieved=%d".formatted(query, retrieved.size());
-        if (!isKnowledgeEnough(context, retrieved)) {
-            String refinedQuery = refineQuery(context, query, retrieved);
+        if (complexConsultation && !isKnowledgeEnough(context, retrieved)) {
+            String refinedQuery = keepOriginal(original, refineQuery(context, query, retrieved));
             if (!refinedQuery.equals(query)) {
                 List<SearchResult> refined = knowledgeService.retrieve(refinedQuery, properties.getKnowledge().getTopK());
                 if (!refined.isEmpty()) {
@@ -61,6 +63,21 @@ public class KnowledgeAgent implements MindBridgeAgent {
         return AgentDecision.continueWith(
                 AgentAction.RETRIEVE_KNOWLEDGE,
                 observation);
+    }
+
+    private boolean isComplexConsultation(AgentContext context) {
+        String input = context.modelInput();
+        // ponytail: length and multiple clauses are a conservative proxy; revisit if real queries show misses.
+        return context.intent() == IntentType.CONSULT && input != null && input.length() >= 40
+                && (input.contains("，") || input.contains(",") || input.contains("。"));
+    }
+
+    private String keepOriginal(String original, String addition) {
+        if (addition == null || addition.isBlank() || addition.equals(original)
+                || addition.startsWith(original + " ")) {
+            return addition == null || addition.isBlank() ? original : addition;
+        }
+        return original + " " + addition;
     }
 
     private String rewriteQuery(AgentContext context) {
