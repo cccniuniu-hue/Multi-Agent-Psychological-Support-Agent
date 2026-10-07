@@ -7,7 +7,10 @@ import com.mindbridge.agent.service.ai.AiMessage;
 import com.mindbridge.agent.service.knowledge.KnowledgeService;
 import com.mindbridge.agent.service.knowledge.SearchResult;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -47,19 +50,15 @@ public class KnowledgeAgent implements MindBridgeAgent {
     @Override
     public AgentDecision act(AgentContext context) {
         String original = context.modelInput();
-        boolean complexConsultation = isComplexConsultation(context);
-        String query = complexConsultation ? keepOriginal(original, rewriteQuery(context)) : original;
-        List<SearchResult> retrieved = knowledgeService.retrieve(query, properties.getKnowledge().getTopK());
-        String observation = "query=%s; retrieved=%d".formatted(query, retrieved.size());
-        if (complexConsultation && !isKnowledgeEnough(context, retrieved)) {
-            String refinedQuery = keepOriginal(original, refineQuery(context, query, retrieved));
-            if (!refinedQuery.equals(query)) {
-                List<SearchResult> refined = knowledgeService.retrieve(refinedQuery, properties.getKnowledge().getTopK());
-                if (!refined.isEmpty()) {
-                    query = refinedQuery;
-                    retrieved = refined;
-                    observation = "query=%s; refined=true; retrieved=%d".formatted(query, retrieved.size());
-                }
+        int topK = properties.getKnowledge().getTopK();
+        List<SearchResult> retrieved = knowledgeService.retrieve(original, topK);
+        String query = original;
+        if (isComplexConsultation(context) && !isKnowledgeEnough(context, retrieved)) {
+            String rewritten = rewriteQuery(context);
+            if (!rewritten.equals(original)) {
+                List<SearchResult> second = knowledgeService.retrieve(rewritten, topK);
+                retrieved = mergeResults(retrieved, second, topK);
+                query = keepOriginal(original, rewritten);
             }
         }
         context.setKnowledgeQuery(query);
@@ -67,7 +66,28 @@ public class KnowledgeAgent implements MindBridgeAgent {
         context.markKnowledgeHandled();
         return AgentDecision.continueWith(
                 AgentAction.RETRIEVE_KNOWLEDGE,
-                observation);
+                "query=%s; retrieved=%d".formatted(query, retrieved.size()));
+    }
+
+    private List<SearchResult> mergeResults(List<SearchResult> original, List<SearchResult> rewritten, int topK) {
+        Map<Object, SearchResult> merged = new LinkedHashMap<>();
+        for (int i = 0; i < Math.max(original.size(), rewritten.size()); i++) {
+            if (i < original.size()) {
+                SearchResult result = original.get(i);
+                merged.putIfAbsent(resultKey(result), result);
+            }
+            if (i < rewritten.size()) {
+                SearchResult result = rewritten.get(i);
+                merged.putIfAbsent(resultKey(result), result);
+            }
+        }
+        return merged.values().stream().limit(topK).toList();
+    }
+
+    private Object resultKey(SearchResult result) {
+        return result.chunkId() == null
+                ? Arrays.asList(result.source(), result.content())
+                : result.chunkId();
     }
 
     private boolean isComplexConsultation(AgentContext context) {
@@ -130,26 +150,6 @@ public class KnowledgeAgent implements MindBridgeAgent {
 
     static boolean isSufficientAnswer(String decision) {
         return decision != null && "SUFFICIENT".equalsIgnoreCase(decision.trim());
-    }
-
-    private String refineQuery(AgentContext context, String previousQuery, List<SearchResult> results) {
-        return completeQueryRewrite(List.of(
-                    AiMessage.system("""
-                            你是 MindBridge 的 KnowledgeAgent。
-                            上一次检索信息不足，请给出一个新的、更具体的中文检索 query。
-                            只输出查询词本身，不要解释，不要超过 40 个字。
-                            """),
-                    AiMessage.user("""
-                            当前输入：
-                            %s
-
-                            上一次 query：
-                            %s
-
-                            上一次结果：
-                            %s
-                            """.formatted(context.modelInput(), previousQuery, formatResults(results)))
-            ), previousQuery);
     }
 
     private String completeQueryRewrite(List<AiMessage> messages, String fallback) {

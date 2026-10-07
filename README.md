@@ -47,7 +47,7 @@ MemoryAgent
 
 - `MemoryAgent`：读取 Redis 短期记忆，并用当前输入从 Chroma 召回相关用户画像；Redis 为空时从 MySQL 长期聊天记录恢复。
 - `SupervisorAgent`：调用模型判断 `CHAT / CONSULT / RISK`，决定后续交给普通陪伴还是心理支持链路。
-- `KnowledgeAgent`：简短咨询和风险输入直接用原问题检索；复杂咨询才尝试附加改写词，并判断检索结果是否足够。
+- `KnowledgeAgent`：简短咨询和风险输入直接用原问题检索；复杂咨询先检索原问题，证据不足时最多用改写词补检索一次，并合并去重两批结果。
 - `RiskGuardianAgent`：调用模型做后台心理状态评估，同时保留高风险词库硬兜底。
 - `CompanionAgent`：调用模型生成普通聊天回复策略，并组装普通助手回复 prompt。
 - `CounselorAgent`：调用模型生成心理支持回复策略，并结合记忆、RAG、风险守护结果组装回复 prompt。
@@ -329,7 +329,7 @@ Java 客户端读取 Marker 返回的 Base64 图片内容，按 PNG、JPEG 或 W
 
 可选服务使用 `BAAI/bge-reranker-v2-m3` 对一条 query 和最多 50 条候选文本批量评分。使用 `docker compose --profile reranker up -d reranker` 单独启动；请求、响应和错误码见 [服务契约](services/reranker/README.md)。Java 检索链路将向量与 BM25 候选融合后取 Top50 交给 BGE，按原始相关性分数选出 Top5；服务超时、报错或响应不完整时退回初排 Top5。未启动可选服务时也会走这一降级路径。
 
-检索 query 默认保留用户原问题。只有较长且包含多个分句的咨询输入才请求模型补充检索词；改写词必须是单行且不超过 40 字，超过 3 秒或返回无效内容时仅使用原问题。
+检索先使用用户原问题。只有较长且包含多个分句的咨询输入、且原问题检索结果不足时，才请求模型改写并补检索一次；两批结果去重合并。改写词必须是单行且不超过 40 字，超过 3 秒或返回无效内容时仅保留原问题结果。
 
 ## 接入 DeepSeek API
 

@@ -41,17 +41,16 @@ class KnowledgeAgentQueryTests {
     }
 
     @Test
-    void keepsOriginalQuestionAlongsideRewriteForComplexConsultation() {
+    void skipsRewriteWhenOriginalEvidenceIsSufficient() {
         String question = "最近几周我既焦虑又睡不着，考试压力也很大，和室友相处一直紧张，想知道能如何调整以及到哪里求助。";
         Fixture fixture = new Fixture();
         AgentContext context = fixture.context(IntentType.CONSULT, question);
 
         fixture.agent.act(context);
 
-        String expected = question + " 校园心理中心 焦虑睡眠 求助";
-        verify(fixture.knowledgeService).retrieve(expected, 5);
-        assertThat(context.knowledgeQuery()).isEqualTo(expected);
-        assertThat(fixture.rewriteCalls).isEqualTo(1);
+        verify(fixture.knowledgeService).retrieve(question, 5);
+        assertThat(context.knowledgeQuery()).isEqualTo(question);
+        assertThat(fixture.rewriteCalls).isZero();
     }
 
     @Test
@@ -62,7 +61,7 @@ class KnowledgeAgentQueryTests {
             doAnswer(invocation -> {
                 List<AiMessage> messages = invocation.getArgument(0);
                 return messages.get(0).content().contains("改写成适合检索")
-                        ? modelOutput : "SUFFICIENT";
+                        ? modelOutput : "INSUFFICIENT";
             }).when(fixture.aiClient).complete(anyList());
 
             AgentContext context = fixture.context(IntentType.CONSULT, question);
@@ -83,7 +82,7 @@ class KnowledgeAgentQueryTests {
                 Thread.sleep(5000);
                 return "迟到的检索词";
             }
-            return "SUFFICIENT";
+            return "INSUFFICIENT";
         }).when(fixture.aiClient).complete(anyList());
 
         long start = System.nanoTime();
@@ -91,6 +90,40 @@ class KnowledgeAgentQueryTests {
 
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(4500));
         verify(fixture.knowledgeService).retrieve(question, 5);
+    }
+
+    @Test
+    void mergesOriginalAndRewrittenResultsWithoutDuplicatesOrThirdRecall() {
+        String question = "最近几周我既焦虑又睡不着，考试压力也很大，和室友相处一直紧张，想知道能如何调整以及到哪里求助。";
+        Fixture fixture = new Fixture();
+        doAnswer(invocation -> {
+            List<AiMessage> messages = invocation.getArgument(0);
+            return messages.get(0).content().contains("INSUFFICIENT")
+                    ? "INSUFFICIENT" : "alternate query";
+        }).when(fixture.aiClient).complete(anyList());
+        when(fixture.knowledgeService.retrieve(anyString(), eq(5))).thenAnswer(invocation -> {
+            String query = invocation.getArgument(0);
+            if (query.equals(question)) {
+                return List.of(
+                        new SearchResult(1L, "a.md", "original first", 0.9),
+                        new SearchResult(2L, "b.md", "shared", 0.8),
+                        new SearchResult(3L, "c.md", "original third", 0.7));
+            }
+            return List.of(
+                    new SearchResult(2L, "b.md", "shared", 0.95),
+                    new SearchResult(4L, "d.md", "rewritten fourth", 0.9),
+                    new SearchResult(5L, "e.md", "rewritten fifth", 0.8));
+        });
+        AgentContext context = fixture.context(IntentType.CONSULT, question);
+
+        fixture.agent.act(context);
+
+        verify(fixture.knowledgeService).retrieve(question, 5);
+        verify(fixture.knowledgeService).retrieve("alternate query", 5);
+        verify(fixture.aiClient, org.mockito.Mockito.times(2)).complete(anyList());
+        assertThat(context.retrievedKnowledge()).extracting(SearchResult::chunkId)
+                .containsExactly(1L, 2L, 4L, 3L, 5L);
+        assertThat(context.knowledgeQuery()).contains(question, "alternate query");
     }
 
     @Test
