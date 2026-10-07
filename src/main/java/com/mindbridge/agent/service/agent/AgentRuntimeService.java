@@ -1,6 +1,7 @@
 package com.mindbridge.agent.service.agent;
 
 import com.mindbridge.agent.domain.ChatSession;
+import com.mindbridge.agent.domain.IntentType;
 import com.mindbridge.agent.domain.UserAccount;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,11 @@ public class AgentRuntimeService {
         for (int step = 1; step <= MAX_STEPS && !context.finished(); step++) {
             MindBridgeAgent agent = nextAgent(context);
             AgentDecision decision = agent.act(context);
+            if (decision.complete()
+                    && agent.name() != AgentName.COMPANION_AGENT
+                    && agent.name() != AgentName.COUNSELOR_AGENT) {
+                throw new IllegalStateException("Agent loop cannot finish before response planning.");
+            }
             context.addStep(AgentStep.of(step, agent.name(), decision));
             if (decision.complete()) {
                 context.finish();
@@ -50,9 +56,27 @@ public class AgentRuntimeService {
     }
 
     private MindBridgeAgent nextAgent(AgentContext context) {
-        return agents.stream()
-                .filter(agent -> agent.supports(context))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No agent can handle current context."));
+        int completed = context.steps().size();
+        if (completed >= 2 && (!context.intentRouted() || context.intent() == null)) {
+            throw new IllegalStateException("Agent loop has no routed intent.");
+        }
+        MindBridgeAgent agent = switch (completed) {
+            case 0 -> agents.get(0);
+            case 1 -> agents.get(1);
+            case 2 -> context.intent() == IntentType.CHAT
+                    ? agents.get(4) : agents.get(2);
+            case 3 -> {
+                if (context.intent() == IntentType.CHAT) {
+                    throw new IllegalStateException("Chat response agent did not finish.");
+                }
+                yield agents.get(3);
+            }
+            case 4 -> agents.get(5);
+            default -> throw new IllegalStateException("Agent loop exceeded its route.");
+        };
+        if (!agent.supports(context)) {
+            throw new IllegalStateException("Agent loop state does not allow " + agent.name());
+        }
+        return agent;
     }
 }
