@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class AgentRuntimeService {
 
-    private static final int MAX_STEPS = 8;
+    private static final int MAX_STEPS = 5;
 
     private final List<MindBridgeAgent> agents;
 
@@ -47,10 +47,13 @@ public class AgentRuntimeService {
                     && agent.name() != AgentName.COUNSELOR_AGENT) {
                 throw new IllegalStateException("Agent loop cannot finish before response planning.");
             }
-            context.addStep(AgentStep.of(step, agent.name(), decision));
+            context.addStep(AgentStep.of(step, agent.name(), decision, context));
             if (decision.complete()) {
                 context.finish();
             }
+        }
+        if (!context.finished()) {
+            throw new IllegalStateException("Agent loop exceeded maximum steps: " + MAX_STEPS);
         }
         return AgentRunResult.from(context);
     }

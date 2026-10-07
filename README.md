@@ -33,14 +33,12 @@ src/main/java/com/mindbridge/agent
 
 ## Agent loop 与多 Agent 分工
 
-每轮对话进入一个有限步 agent loop，最多执行 8 步，防止心理安全场景中出现无限自主循环：
+每轮对话进入一个最多 5 步的 agent loop；未完成的循环会报错，不能跳过风险评估直接生成咨询回复：
 
 ```text
-MemoryAgent
--> SupervisorAgent
--> KnowledgeAgent
--> RiskGuardianAgent
--> CompanionAgent / CounselorAgent
+MemoryAgent -> SupervisorAgent
+  ├─ CHAT -> CompanionAgent
+  └─ CONSULT / RISK -> KnowledgeAgent -> RiskGuardianAgent -> CounselorAgent
 ```
 
 各 Agent 分工：
@@ -53,6 +51,7 @@ MemoryAgent
 - `CounselorAgent`：调用模型生成心理支持回复策略，并结合记忆、RAG、风险守护结果组装回复 prompt。
 
 最终回复仍通过 Spring AI 流式调用项目模型输出给学生端；后台风险报告、Excel 和预警工具链仍按安全规则执行。
+每步 trace 记录 Agent、动作、结果摘要及执行后的路由状态，并随对话写入管理员可查看的运行轨迹。
 
 ## 部署与运行
 

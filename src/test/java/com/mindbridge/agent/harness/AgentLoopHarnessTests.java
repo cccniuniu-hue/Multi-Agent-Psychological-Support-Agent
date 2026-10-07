@@ -139,6 +139,11 @@ class AgentLoopHarnessTests {
                 AgentName.KNOWLEDGE_AGENT,
                 AgentName.RISK_GUARDIAN_AGENT,
                 AgentName.COUNSELOR_AGENT);
+        assertThat(result.steps()).hasSize(5);
+        assertThat(result.steps().get(0).observation()).contains("memoryLoaded=true");
+        assertThat(result.steps().get(2).observation()).contains("riskAssessed=false");
+        assertThat(result.steps().get(3).observation()).contains("riskAssessed=true");
+        assertThat(result.steps().get(4).observation()).contains("responsePlanned=true");
     }
 
     private AgentRunResult run(String input) {

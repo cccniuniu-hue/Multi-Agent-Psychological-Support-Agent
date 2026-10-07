@@ -31,6 +31,17 @@ class AgentRuntimeRoutingTests {
         verify(fixture.counselorAgent, never()).act(any());
     }
 
+    @Test
+    void failsWhenResponseAgentDoesNotFinishWithinFiveSteps() {
+        Fixture fixture = new Fixture(false, false, false);
+
+        assertThatThrownBy(fixture::run)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("maximum steps");
+        verify(fixture.riskGuardianAgent).act(any());
+        verify(fixture.counselorAgent).act(any());
+    }
+
     private static class Fixture {
         private final MemoryAgent memoryAgent = mock(MemoryAgent.class);
         private final SupervisorAgent supervisorAgent = mock(SupervisorAgent.class);
@@ -41,6 +52,10 @@ class AgentRuntimeRoutingTests {
         private final AgentRuntimeService runtime;
 
         private Fixture(boolean finishAtKnowledge) {
+            this(finishAtKnowledge, true, true);
+        }
+
+        private Fixture(boolean finishAtKnowledge, boolean markRiskEarly, boolean finishAtResponse) {
             when(memoryAgent.supports(any())).thenReturn(true);
             when(memoryAgent.act(any())).thenAnswer(invocation -> {
                 AgentContext context = invocation.getArgument(0);
@@ -58,13 +73,23 @@ class AgentRuntimeRoutingTests {
             when(knowledgeAgent.act(any())).thenAnswer(invocation -> {
                 AgentContext context = invocation.getArgument(0);
                 context.markKnowledgeHandled();
-                context.markRiskAssessed();
+                if (markRiskEarly) {
+                    context.markRiskAssessed();
+                }
                 return finishAtKnowledge
                         ? AgentDecision.finish(AgentAction.RETRIEVE_KNOWLEDGE, "early finish")
                         : AgentDecision.continueWith(AgentAction.RETRIEVE_KNOWLEDGE, "knowledge");
             });
+            when(riskGuardianAgent.supports(any())).thenReturn(!markRiskEarly);
+            when(riskGuardianAgent.act(any())).thenAnswer(invocation -> {
+                AgentContext context = invocation.getArgument(0);
+                context.markRiskAssessed();
+                return AgentDecision.continueWith(AgentAction.ASSESS_RISK, "assessed");
+            });
             when(counselorAgent.supports(any())).thenReturn(true);
-            when(counselorAgent.act(any())).thenReturn(AgentDecision.finish(AgentAction.PLAN_RESPONSE, "counselor"));
+            when(counselorAgent.act(any())).thenAnswer(invocation -> finishAtResponse
+                    ? AgentDecision.finish(AgentAction.PLAN_RESPONSE, "counselor")
+                    : AgentDecision.continueWith(AgentAction.PLAN_RESPONSE, "unfinished"));
             runtime = new AgentRuntimeService(memoryAgent, supervisorAgent, knowledgeAgent,
                     riskGuardianAgent, companionAgent, counselorAgent);
         }
