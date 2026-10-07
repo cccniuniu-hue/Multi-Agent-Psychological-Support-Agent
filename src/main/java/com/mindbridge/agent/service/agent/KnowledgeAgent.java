@@ -121,11 +121,15 @@ public class KnowledgeAgent implements MindBridgeAgent {
                             检索结果：
                             %s
                             """.formatted(context.modelInput(), formatResults(results)))
-            )).trim().toUpperCase();
-            return decision.contains("SUFFICIENT") && !decision.contains("INSUFFICIENT");
+            ));
+            return isSufficientAnswer(decision);
         } catch (Exception ignored) {
-            return true;
+            return false;
         }
+    }
+
+    static boolean isSufficientAnswer(String decision) {
+        return decision != null && "SUFFICIENT".equalsIgnoreCase(decision.trim());
     }
 
     private String refineQuery(AgentContext context, String previousQuery, List<SearchResult> results) {

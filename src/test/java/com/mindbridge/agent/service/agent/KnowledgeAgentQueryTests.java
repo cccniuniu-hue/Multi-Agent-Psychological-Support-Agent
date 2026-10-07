@@ -93,6 +93,14 @@ class KnowledgeAgentQueryTests {
         verify(fixture.knowledgeService).retrieve(question, 5);
     }
 
+    @Test
+    void acceptsOnlyExactSufficiencyAnswer() {
+        assertThat(KnowledgeAgent.isSufficientAnswer(" SUFFICIENT ")).isTrue();
+        assertThat(KnowledgeAgent.isSufficientAnswer("INSUFFICIENT")).isFalse();
+        assertThat(KnowledgeAgent.isSufficientAnswer("NOT SUFFICIENT")).isFalse();
+        assertThat(KnowledgeAgent.isSufficientAnswer(null)).isFalse();
+    }
+
     private static class Fixture {
         private final KnowledgeService knowledgeService = mock(KnowledgeService.class);
         private final AiClient aiClient = mock(AiClient.class);
