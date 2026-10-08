@@ -543,7 +543,7 @@ Agent 顺序：
 - 优先从 Redis 读取短期记忆。
 - Redis 没有时，从 MySQL/H2 读取最近聊天记录并刷新 Redis。
 - 调用 `UserProfileMemoryService.profileBrief(user, currentInput)` 召回用户画像。
-- 让模型从最近对话中生成 1 到 3 条和当前输入相关的记忆摘要。
+- 复用 Redis 中的短期摘要；约每 5 个已完成轮次，结合已有摘要和最近对话更新 1 到 3 条要点。Redis 历史为空时仍从 MySQL 恢复。
 - 把用户画像和对话记忆合并成 `memoryBrief`。
 
 这个 `memoryBrief` 后续会进入 `KnowledgeAgent.rewriteQuery()`。例如用户之前提到“我不太敢找辅导员”，当前又说“最近还是睡不着”，query 改写时就更可能加入“校园心理中心、辅导员、睡眠焦虑”等检索词。

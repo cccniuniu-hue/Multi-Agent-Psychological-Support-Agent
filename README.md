@@ -43,7 +43,7 @@ MemoryAgent -> SupervisorAgent
 
 各 Agent 分工：
 
-- `MemoryAgent`：读取 Redis 短期记忆，并用当前输入从 Chroma 召回相关用户画像；Redis 为空时从 MySQL 长期聊天记录恢复。
+- `MemoryAgent`：读取 Redis 短期记忆和阶段性摘要，约每 5 轮更新一次摘要；Redis 历史为空时从 MySQL 恢复最近聊天记录，并结合用户画像准备上下文。
 - `SupervisorAgent`：调用模型判断 `CHAT / CONSULT / RISK`，决定后续交给普通陪伴还是心理支持链路。
 - `KnowledgeAgent`：简短咨询和风险输入直接用原问题检索；复杂咨询先检索原问题，证据不足时最多用改写词补检索一次，并合并去重两批结果。
 - `RiskGuardianAgent`：调用模型做后台心理状态评估，同时保留高风险词库硬兜底。

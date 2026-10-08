@@ -9,6 +9,7 @@ import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
 import com.mindbridge.agent.service.memory.ShortTermMemoryService;
 import com.mindbridge.agent.service.memory.ShortTermMemoryService.MemoryMessage;
+import com.mindbridge.agent.service.memory.ShortTermMemoryService.StageSummary;
 import com.mindbridge.agent.service.memory.UserProfileMemoryService;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,6 +23,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class MemoryAgent implements MindBridgeAgent {
+
+    private static final int SUMMARY_INTERVAL_TURNS = 5;
 
     private final ChatMessageRepository chatMessageRepository;
     private final ShortTermMemoryService shortTermMemoryService;
@@ -78,7 +81,7 @@ public class MemoryAgent implements MindBridgeAgent {
         }
 
         String profileBrief = userProfileMemoryService.profileBrief(context.user(), context.modelInput());
-        String historyBrief = summarizeMemory(previousHistory, context.modelInput());
+        String historyBrief = stagedSummary(context.session().getPublicId(), previousHistory);
         context.setPreviousHistory(previousHistory);
         context.setModelHistory(withCurrentUser(previousHistory, context.modelInput()));
         context.setMemoryBrief(combineMemoryBrief(profileBrief, historyBrief));
@@ -106,29 +109,45 @@ public class MemoryAgent implements MindBridgeAgent {
                 .toList();
     }
 
-    private String summarizeMemory(List<AiMessage> history, String currentInput) {
+    private String stagedSummary(String sessionId, List<AiMessage> history) {
         if (history.isEmpty()) {
             return "无相关历史记忆。";
         }
+        StageSummary cached = shortTermMemoryService.summary(sessionId);
+        Long turns = shortTermMemoryService.completedTurns(sessionId);
+        boolean hasCached = cached != null && cached.text() != null && !cached.text().isBlank();
+        if (hasCached && turns != null && turns >= cached.completedTurns()
+                && turns - cached.completedTurns() < SUMMARY_INTERVAL_TURNS) {
+            return cached.text();
+        }
+        String summary = summarizeMemory(history, hasCached ? cached.text() : "无相关历史记忆。");
+        if (summary != null) {
+            shortTermMemoryService.saveSummary(sessionId, summary, turns == null ? 0 : turns);
+            return summary;
+        }
+        return hasCached ? cached.text() : "无相关历史记忆。";
+    }
+
+    private String summarizeMemory(List<AiMessage> history, String previousSummary) {
         try {
             String summary = aiClient.complete(List.of(
                     AiMessage.system("""
                             你是 MindBridge 的 MemoryAgent。
-                            你的任务是从最近对话中提取对当前输入有用的短期/长期记忆。
+                            你的任务是阶段性更新短期对话摘要，结合已有摘要和最近对话。
                             只输出 1-3 条中文要点，不要输出风险等级、诊断结论或后台标签。
-                            如果历史与当前输入无关，只输出：无相关历史记忆。
+                            如果历史没有需要保留的信息，只输出：无相关历史记忆。
                             """),
                     AiMessage.user("""
-                            当前输入：
+                            已有摘要：
                             %s
 
                             最近历史：
                             %s
-                            """.formatted(currentInput, formatHistory(history)))
+                            """.formatted(previousSummary, formatHistory(history)))
             )).trim();
-            return summary.isBlank() ? "无相关历史记忆。" : shorten(summary, 400);
+            return summary.isBlank() ? null : shorten(summary, 400);
         } catch (Exception ignored) {
-            return "无相关历史记忆。";
+            return null;
         }
     }
 
