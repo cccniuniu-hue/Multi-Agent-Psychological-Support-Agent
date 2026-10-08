@@ -20,6 +20,8 @@ public class ShortTermMemoryService {
 
     private static final Logger log = LoggerFactory.getLogger(ShortTermMemoryService.class);
     private static final String KEY_PREFIX = "mindbridge:chat:short-memory:";
+    private static final String SUMMARY_SUFFIX = ":summary";
+    private static final String TURNS_SUFFIX = ":turns";
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -42,6 +44,10 @@ public class ShortTermMemoryService {
             redisTemplate.opsForList().rightPush(key, value);
             redisTemplate.opsForList().trim(key, -messageLimit(), -1);
             redisTemplate.expire(key, ttl());
+            if (role == MessageRole.ASSISTANT) {
+                redisTemplate.opsForValue().increment(key + TURNS_SUFFIX);
+                redisTemplate.expire(key + TURNS_SUFFIX, ttl());
+            }
         } catch (Exception exception) {
             log.debug("Redis short-term memory append skipped: {}", exception.getMessage());
         }
@@ -76,8 +82,40 @@ public class ShortTermMemoryService {
                     .toList();
             redisTemplate.opsForList().rightPushAll(key, values);
             redisTemplate.expire(key, ttl());
+            redisTemplate.delete(key + SUMMARY_SUFFIX);
+            long turns = messages.stream().filter(message -> message.role() == MessageRole.ASSISTANT).count();
+            redisTemplate.opsForValue().set(key + TURNS_SUFFIX, Long.toString(turns), ttl());
         } catch (Exception exception) {
             log.debug("Redis short-term memory refresh skipped: {}", exception.getMessage());
+        }
+    }
+
+    public StageSummary summary(String sessionId) {
+        try {
+            String value = redisTemplate.opsForValue().get(key(sessionId) + SUMMARY_SUFFIX);
+            return value == null ? null : objectMapper.readValue(value, StageSummary.class);
+        } catch (Exception exception) {
+            log.debug("Redis short-term summary read skipped: {}", exception.getMessage());
+            return null;
+        }
+    }
+
+    public Long completedTurns(String sessionId) {
+        try {
+            String value = redisTemplate.opsForValue().get(key(sessionId) + TURNS_SUFFIX);
+            return value == null ? null : Long.valueOf(value);
+        } catch (Exception exception) {
+            log.debug("Redis short-term turn count read skipped: {}", exception.getMessage());
+            return null;
+        }
+    }
+
+    public void saveSummary(String sessionId, String text, long completedTurns) {
+        try {
+            String value = objectMapper.writeValueAsString(new StageSummary(text, completedTurns));
+            redisTemplate.opsForValue().set(key(sessionId) + SUMMARY_SUFFIX, value, ttl());
+        } catch (Exception exception) {
+            log.debug("Redis short-term summary write skipped: {}", exception.getMessage());
         }
     }
 
@@ -110,5 +148,8 @@ public class ShortTermMemoryService {
     }
 
     public record MemoryMessage(MessageRole role, String content) {
+    }
+
+    public record StageSummary(String text, long completedTurns) {
     }
 }
