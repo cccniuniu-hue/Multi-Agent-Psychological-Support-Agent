@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +86,8 @@ class ApiSseHarnessTests {
                 .contains("event:done")
                 .contains("这是一个稳定的测试回复。");
         assertThat(reportRepository.findAll()).isEmpty();
+        verify(userProfileMemoryService).rememberConversation(
+                any(UserAccount.class), anyString(), eq(RiskLevel.LOW), anyString(), eq(false));
         assertThat(traceRepository.findAll()).singleElement()
                 .satisfies(trace -> {
                     assertThat(trace.getIntent().name()).isEqualTo("CHAT");

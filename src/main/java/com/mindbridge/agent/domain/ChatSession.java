@@ -2,6 +2,8 @@ package com.mindbridge.agent.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -40,6 +42,12 @@ public class ChatSession {
     @Column(nullable = false)
     private Instant updatedAt = Instant.now();
 
+    private Long profileMemoryThroughMessageId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private RiskLevel profileMemoryRiskLevel;
+
     public Long getId() {
         return id;
     }
@@ -74,6 +82,22 @@ public class ChatSession {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public Long getProfileMemoryThroughMessageId() {
+        return profileMemoryThroughMessageId;
+    }
+
+    public void setProfileMemoryThroughMessageId(Long messageId) {
+        this.profileMemoryThroughMessageId = messageId;
+    }
+
+    public RiskLevel getProfileMemoryRiskLevel() {
+        return profileMemoryRiskLevel;
+    }
+
+    public void setProfileMemoryRiskLevel(RiskLevel riskLevel) {
+        this.profileMemoryRiskLevel = riskLevel;
     }
 
     public void touch() {
