@@ -98,11 +98,20 @@ public class UserProfileMemoryService {
         if (candidates.isEmpty()) {
             return;
         }
-        List<UserMemoryItem> existing = userMemoryItemRepository.findByUser_IdOrderByUpdatedAtDesc(user.getId());
+        Map<String, MemoryCandidate> unique = new LinkedHashMap<>();
         for (MemoryCandidate candidate : candidates) {
             if (!isUsable(candidate)) {
                 continue;
             }
+            unique.merge(candidate.type() + ":" + normalize(candidate.summary()), candidate, (first, next) ->
+                    new MemoryCandidate(first.type(),
+                            next.confidence() > first.confidence() ? next.summary() : first.summary(),
+                            mergeEvidence(first.evidence(), next.evidence()),
+                            Math.max(first.confidence(), next.confidence())));
+        }
+        List<UserMemoryItem> existing = new ArrayList<>(
+                userMemoryItemRepository.findByUser_IdOrderByUpdatedAtDesc(user.getId()));
+        for (MemoryCandidate candidate : unique.values()) {
             upsert(user, session, candidate, existing);
         }
         prune(user.getId());
@@ -225,7 +234,7 @@ public class UserProfileMemoryService {
         String normalizedSummary = normalize(candidate.summary());
         for (UserMemoryItem item : existing) {
             if (item.getType() == candidate.type() && normalize(item.getSummary()).equals(normalizedSummary)) {
-                item.refreshSeen(session, candidate.evidence(), candidate.confidence());
+                item.refreshSeen(session, mergeEvidence(item.getEvidence(), candidate.evidence()), candidate.confidence());
                 UserMemoryItem saved = userMemoryItemRepository.save(item);
                 userMemoryChromaGateway.mirror(saved);
                 return;
@@ -288,6 +297,18 @@ public class UserProfileMemoryService {
 
     private String clean(String value) {
         return shorten(value == null ? "" : value.replaceAll("\\s+", " ").trim(), 120);
+    }
+
+    private String mergeEvidence(String previous, String current) {
+        String oldEvidence = clean(previous);
+        String newEvidence = clean(current);
+        if (newEvidence.isBlank() || oldEvidence.contains(newEvidence)) {
+            return oldEvidence;
+        }
+        if (oldEvidence.isBlank() || newEvidence.contains(oldEvidence)) {
+            return newEvidence;
+        }
+        return shorten(newEvidence + "；" + oldEvidence, 120);
     }
 
     private String shorten(String value, int maxLength) {
