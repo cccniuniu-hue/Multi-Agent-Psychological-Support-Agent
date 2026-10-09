@@ -670,12 +670,31 @@ function renderAdminDashboard(reports, excelRecords, alerts, traces) {
   renderAdminTraceRows(traces);
 }
 
-function startNewSession() {
-  state.sessionId = null;
-  els.messages.innerHTML = "";
-  setSessionBadge("READY");
-  showEmpty();
-  els.messageInput.focus();
+async function startNewSession() {
+  if (state.sending || state.isAdmin) return;
+  state.sending = true;
+  els.sendButton.disabled = true;
+  els.newSessionButton.disabled = true;
+  els.switchAccount.disabled = true;
+  try {
+    if (state.sessionId) {
+      setSessionBadge("正在整理会话", "medium");
+      await api(`/api/chat/sessions/${encodeURIComponent(state.sessionId)}/end`, { method: "POST" });
+    }
+    state.sessionId = null;
+    els.messages.innerHTML = "";
+    setSessionBadge("READY");
+    showEmpty();
+    await loadUserMemories();
+  } catch (error) {
+    setSessionBadge("结束失败，请重试", "high");
+  } finally {
+    state.sending = false;
+    els.sendButton.disabled = false;
+    els.newSessionButton.disabled = false;
+    els.switchAccount.disabled = false;
+    els.messageInput.focus();
+  }
 }
 
 function roleLabel(role) {
@@ -1180,6 +1199,8 @@ async function sendMessage(event) {
 
   state.sending = true;
   els.sendButton.disabled = true;
+  els.newSessionButton.disabled = true;
+  els.switchAccount.disabled = true;
   setSessionBadge("THINKING", "medium");
   els.messageInput.value = "";
   addMessage("user", message);
@@ -1232,6 +1253,8 @@ async function sendMessage(event) {
   } finally {
     state.sending = false;
     els.sendButton.disabled = false;
+    els.newSessionButton.disabled = false;
+    els.switchAccount.disabled = false;
     setSessionBadge("READY");
     els.messageInput.focus();
   }

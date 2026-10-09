@@ -29,8 +29,10 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -95,6 +97,16 @@ public class ChatService {
                 .onErrorResume(exception -> Flux.just(event(
                         "error",
                         ChatStreamEvent.error(null, "服务暂时不可用：" + exception.getMessage()))));
+    }
+
+    public void endSession(Long userId, String sessionId) {
+        UserAccount user = userAccountRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        chatSessionRepository.findByPublicIdAndUser_Id(sessionId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found"));
+        if (!userProfileMemoryService.rememberConversation(user, sessionId, null, "", true)) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "会话整理暂时失败，请稍后重试。");
+        }
     }
 
     private PreparedConversation prepare(Long userId, ChatRequest request) {
