@@ -108,7 +108,7 @@ public class ChatService {
         Instant completedAt = Instant.now();
         ChatMessage userMessage = saveMessage(user, session, MessageRole.USER, input);
         agentRunTraceService.saveRun(user, session, userMessage, input, agentRun, startedAt, completedAt);
-        rememberUserProfile(user, session, input, agentRun.memoryBrief());
+        rememberUserProfile(user, session, agentRun.riskLevel(), agentRun.memoryBrief());
 
         PsychologicalReport report = null;
         if (agentRun.requiresReport()) {
@@ -174,14 +174,15 @@ public class ChatService {
         message.setContent(content);
         chatMessageRepository.save(message);
         session.touch();
-        chatSessionRepository.save(session);
+        // 只更新活跃时间，避免流式回复使用的旧实体覆盖画像抽取进度。
+        chatSessionRepository.updateActivity(session.getId(), session.getUpdatedAt());
         shortTermMemoryService.append(session.getPublicId(), role, content);
         return message;
     }
 
-    private void rememberUserProfile(UserAccount user, ChatSession session, String input, String memoryBrief) {
+    private void rememberUserProfile(UserAccount user, ChatSession session, RiskLevel riskLevel, String memoryBrief) {
         try {
-            userProfileMemoryService.rememberUserInput(user, session, input, memoryBrief);
+            userProfileMemoryService.rememberConversation(user, session.getPublicId(), riskLevel, memoryBrief, false);
         } catch (Exception exception) {
             log.debug("User profile memory update skipped: {}", exception.getMessage());
         }

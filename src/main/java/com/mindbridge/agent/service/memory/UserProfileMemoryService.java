@@ -3,12 +3,17 @@ package com.mindbridge.agent.service.memory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mindbridge.agent.config.MindBridgeProperties;
+import com.mindbridge.agent.domain.ChatMessage;
 import com.mindbridge.agent.domain.ChatSession;
+import com.mindbridge.agent.domain.MessageRole;
+import com.mindbridge.agent.domain.RiskLevel;
 import com.mindbridge.agent.domain.UserAccount;
 import com.mindbridge.agent.domain.UserMemoryItem;
 import com.mindbridge.agent.domain.UserMemoryType;
-import com.mindbridge.agent.repository.UserMemoryItemRepository;
+import com.mindbridge.agent.repository.ChatMessageRepository;
+import com.mindbridge.agent.repository.ChatSessionRepository;
 import com.mindbridge.agent.repository.UserAccountRepository;
+import com.mindbridge.agent.repository.UserMemoryItemRepository;
 import com.mindbridge.agent.service.PrivacySanitizer;
 import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
@@ -37,6 +42,8 @@ public class UserProfileMemoryService {
 
     private final UserMemoryItemRepository userMemoryItemRepository;
     private final UserAccountRepository userAccountRepository;
+    private final ChatSessionRepository chatSessionRepository;
+    private final ChatMessageRepository chatMessageRepository;
     private final UserMemoryChromaGateway userMemoryChromaGateway;
     private final MindBridgeProperties properties;
     private final AiClient aiClient;
@@ -46,6 +53,8 @@ public class UserProfileMemoryService {
     public UserProfileMemoryService(
             UserMemoryItemRepository userMemoryItemRepository,
             UserAccountRepository userAccountRepository,
+            ChatSessionRepository chatSessionRepository,
+            ChatMessageRepository chatMessageRepository,
             UserMemoryChromaGateway userMemoryChromaGateway,
             MindBridgeProperties properties,
             AiClient aiClient,
@@ -54,6 +63,8 @@ public class UserProfileMemoryService {
     ) {
         this.userMemoryItemRepository = userMemoryItemRepository;
         this.userAccountRepository = userAccountRepository;
+        this.chatSessionRepository = chatSessionRepository;
+        this.chatMessageRepository = chatMessageRepository;
         this.userMemoryChromaGateway = userMemoryChromaGateway;
         this.properties = properties;
         this.aiClient = aiClient;
@@ -84,7 +95,47 @@ public class UserProfileMemoryService {
     }
 
     @Transactional
-    public void rememberUserInput(
+    public boolean rememberConversation(
+            UserAccount user, String sessionId, RiskLevel riskLevel, String memoryBrief, boolean ending
+    ) {
+        ChatSession session = chatSessionRepository.findForMemoryUpdate(sessionId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("Session not found"));
+        RiskLevel previousRisk = session.getProfileMemoryRiskLevel() == null
+                ? RiskLevel.LOW : session.getProfileMemoryRiskLevel();
+        boolean riskChanged = riskLevel != null && riskLevel != previousRisk;
+        while (true) {
+            long throughId = session.getProfileMemoryThroughMessageId() == null
+                    ? 0L : session.getProfileMemoryThroughMessageId();
+            List<ChatMessage> pending = chatMessageRepository
+                    .findTop10BySession_IdAndRoleAndIdGreaterThanOrderByIdAsc(session.getId(), MessageRole.USER, throughId);
+            // shortcut: 重要变化用风险变化及明确偏好表达识别，需更细粒度情绪变化时再扩展。
+            boolean due = ending || pending.size() >= 10 || riskChanged
+                    || pending.stream().anyMatch(message -> hasExplicitPreference(message.getContent()));
+            if (pending.isEmpty() || !due) {
+                if (riskLevel != null) {
+                    session.setProfileMemoryRiskLevel(riskLevel);
+                }
+                chatSessionRepository.save(session);
+                return true;
+            }
+            String input = String.join("\n", pending.stream()
+                    .map(message -> shorten(privacySanitizer.sanitize(message.getContent()), 800))
+                    .toList());
+            if (!rememberUserInput(user, session, input, memoryBrief)) {
+                return false;
+            }
+            session.setProfileMemoryThroughMessageId(pending.get(pending.size() - 1).getId());
+            if (riskLevel != null) {
+                session.setProfileMemoryRiskLevel(riskLevel);
+            }
+            chatSessionRepository.save(session);
+            if (!ending) {
+                return true;
+            }
+        }
+    }
+
+    boolean rememberUserInput(
             UserAccount user,
             ChatSession session,
             String input,
@@ -92,11 +143,14 @@ public class UserProfileMemoryService {
     ) {
         String sanitizedInput = privacySanitizer.sanitize(input);
         if (sanitizedInput.length() < 6) {
-            return;
+            return true;
         }
         List<MemoryCandidate> candidates = extractCandidates(sanitizedInput, memoryBrief);
+        if (candidates == null) {
+            return false;
+        }
         if (candidates.isEmpty()) {
-            return;
+            return true;
         }
         Map<String, MemoryCandidate> unique = new LinkedHashMap<>();
         for (MemoryCandidate candidate : candidates) {
@@ -115,6 +169,7 @@ public class UserProfileMemoryService {
             upsert(user, session, candidate, existing);
         }
         prune(user.getId());
+        return true;
     }
 
     @Transactional
@@ -174,20 +229,21 @@ public class UserProfileMemoryService {
                             已有记忆摘要：
                             %s
 
-                            本轮用户输入：
+                            待处理的用户对话（按时间顺序）：
                             %s
-                            """.formatted(memoryBrief, input))
+                            """.formatted(privacySanitizer.sanitize(memoryBrief), input))
             )).trim());
         } catch (Exception ignored) {
-            return fallbackCandidates(input);
+            List<MemoryCandidate> fallback = fallbackCandidates(input);
+            return fallback.isEmpty() ? null : fallback;
         }
     }
 
     private List<MemoryCandidate> parseCandidates(String response) throws Exception {
         String json = stripCodeFence(response);
         JsonNode root = objectMapper.readTree(json);
-        if (!root.isArray()) {
-            return List.of();
+        if (root == null || !root.isArray()) {
+            throw new IllegalArgumentException("Memory extraction must return a JSON array");
         }
         List<MemoryCandidate> candidates = new ArrayList<>();
         for (JsonNode node : root) {
@@ -203,9 +259,14 @@ public class UserProfileMemoryService {
     }
 
     private List<MemoryCandidate> fallbackCandidates(String input) {
-        String normalized = input.toLowerCase(Locale.ROOT);
-        if (containsAny(
-                normalized,
+        return input.lines().filter(this::hasExplicitPreference)
+                .map(line -> new MemoryCandidate(UserMemoryType.PREFERENCE,
+                        shorten(line, 60), shorten(line, 80), 0.6))
+                .toList();
+    }
+
+    private boolean hasExplicitPreference(String input) {
+        return containsAny(input,
                 "以后请",
                 "以后帮我",
                 "请记住",
@@ -215,14 +276,7 @@ public class UserProfileMemoryService {
                 "我更喜欢",
                 "我希望你",
                 "以后不要",
-                "请不要")) {
-            return List.of(new MemoryCandidate(
-                    UserMemoryType.PREFERENCE,
-                    shorten(input, 60),
-                    shorten(input, 80),
-                    0.6));
-        }
-        return List.of();
+                "请不要");
     }
 
     private void upsert(
