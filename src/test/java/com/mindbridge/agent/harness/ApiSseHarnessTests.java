@@ -5,18 +5,23 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.mindbridge.agent.domain.ChatSession;
 import com.mindbridge.agent.domain.RiskLevel;
 import com.mindbridge.agent.domain.UserAccount;
 import com.mindbridge.agent.repository.AgentRunTraceRepository;
+import com.mindbridge.agent.repository.ChatSessionRepository;
 import com.mindbridge.agent.repository.PsychologicalReportRepository;
+import com.mindbridge.agent.repository.UserAccountRepository;
 import com.mindbridge.agent.service.ToolOrchestrationService;
 import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.memory.ShortTermMemoryService;
 import com.mindbridge.agent.service.memory.UserProfileMemoryService;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -47,6 +52,12 @@ class ApiSseHarnessTests {
 
     @Autowired
     private AgentRunTraceRepository traceRepository;
+
+    @Autowired
+    private ChatSessionRepository sessionRepository;
+
+    @Autowired
+    private UserAccountRepository userRepository;
 
     @MockBean
     private AiClient aiClient;
@@ -137,6 +148,51 @@ class ApiSseHarnessTests {
                         """)
                 .exchange()
                 .expectStatus().isForbidden();
+    }
+
+    @Test
+    void studentCanEndOwnedSessionAndFlushPendingProfileMemory() {
+        ChatSession session = createSession("student");
+        when(userProfileMemoryService.rememberConversation(any(UserAccount.class), eq(session.getPublicId()),
+                eq(null), eq(""), eq(true))).thenReturn(true);
+
+        webTestClient.post().uri("/api/chat/sessions/{sessionId}/end", session.getPublicId())
+                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .exchange().expectStatus().isOk();
+
+        verify(userProfileMemoryService).rememberConversation(any(UserAccount.class), eq(session.getPublicId()),
+                eq(null), eq(""), eq(true));
+        assertThat(sessionRepository.findById(session.getId())).isPresent();
+    }
+
+    @Test
+    void sessionEndRejectsOtherOwnersAndAdminAccounts() {
+        ChatSession otherSession = createSession("admin");
+        webTestClient.post().uri("/api/chat/sessions/{sessionId}/end", otherSession.getPublicId())
+                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .exchange().expectStatus().isNotFound();
+        webTestClient.post().uri("/api/chat/sessions/{sessionId}/end", otherSession.getPublicId())
+                .headers(headers -> headers.setBasicAuth("admin", "admin123"))
+                .exchange().expectStatus().isForbidden();
+        verify(userProfileMemoryService, never()).rememberConversation(any(), anyString(), any(), anyString(), eq(true));
+    }
+
+    @Test
+    void failedSessionEndCanBeRetriedWithoutDeletingConversation() {
+        ChatSession session = createSession("student");
+        when(userProfileMemoryService.rememberConversation(any(UserAccount.class), eq(session.getPublicId()),
+                eq(null), eq(""), eq(true))).thenReturn(false);
+        webTestClient.post().uri("/api/chat/sessions/{sessionId}/end", session.getPublicId())
+                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .exchange().expectStatus().isEqualTo(503);
+        assertThat(sessionRepository.findById(session.getId())).isPresent();
+    }
+
+    private ChatSession createSession(String username) {
+        ChatSession session = new ChatSession();
+        session.setPublicId(UUID.randomUUID().toString());
+        session.setUser(userRepository.findByUsername(username).orElseThrow());
+        return sessionRepository.save(session);
     }
 
     private String postChat(String username, String password, String message) {

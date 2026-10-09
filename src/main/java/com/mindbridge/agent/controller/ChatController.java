@@ -1,5 +1,6 @@
 package com.mindbridge.agent.controller;
 
+import com.mindbridge.agent.dto.ApiMessage;
 import com.mindbridge.agent.dto.ChatRequest;
 import com.mindbridge.agent.dto.ChatStreamEvent;
 import com.mindbridge.agent.security.CurrentUser;
@@ -9,12 +10,15 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 @RestController
 @RequestMapping("/api/chat")
@@ -36,12 +40,28 @@ public class ChatController {
             @AuthenticationPrincipal CurrentUser currentUser,
             @Valid @RequestBody ChatRequest request
     ) {
+        requireStudent(currentUser);
+        return chatService.streamChat(currentUser.getId(), request);
+    }
+
+    @PostMapping("/sessions/{sessionId}/end")
+    public Mono<ApiMessage> endSession(
+            @AuthenticationPrincipal CurrentUser currentUser,
+            @PathVariable String sessionId
+    ) {
+        requireStudent(currentUser);
+        return Mono.fromCallable(() -> {
+            chatService.endSession(currentUser.getId(), sessionId);
+            return new ApiMessage("会话已整理，可以开始新会话。");
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private void requireStudent(CurrentUser currentUser) {
         // 管理员后台只用于查看记录和工具状态，不能以管理员身份生成学生对话。
         boolean isAdmin = currentUser.getAuthorities().stream()
                 .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
         if (isAdmin) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "管理员账号只能查看后台记录，不能发起学生对话。");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "管理员账号只能查看后台记录，不能操作学生对话。");
         }
-        return chatService.streamChat(currentUser.getId(), request);
     }
 }

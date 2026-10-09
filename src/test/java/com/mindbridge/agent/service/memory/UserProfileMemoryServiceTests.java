@@ -107,6 +107,35 @@ class UserProfileMemoryServiceTests {
         assertThat(fixture.session.getProfileMemoryThroughMessageId()).isEqualTo(1L);
     }
 
+    @Test
+    void endingFlushesPartialBatchAndRepeatedEndDoesNotExtractAgain() {
+        Fixture fixture = new Fixture();
+        fixture.pending(3, "这是一次普通学习交流。");
+        assertThat(fixture.service.rememberConversation(fixture.user, "session", null, "", true)).isTrue();
+        assertThat(fixture.session.getProfileMemoryThroughMessageId()).isEqualTo(3L);
+        assertThat(fixture.service.rememberConversation(fixture.user, "session", null, "", true)).isTrue();
+        verify(fixture.aiClient).complete(anyList());
+    }
+
+    @Test
+    void endingDrainsOlderBatchesWithoutSkippingPendingMessages() {
+        Fixture fixture = new Fixture();
+        fixture.pending(10, "这是十轮普通学习交流。");
+        List<ChatMessage> remaining = new ArrayList<>();
+        for (long id = 11; id <= 13; id++) {
+            ChatMessage message = mock(ChatMessage.class);
+            when(message.getId()).thenReturn(id);
+            when(message.getContent()).thenReturn("这是剩余的普通学习交流。");
+            remaining.add(message);
+        }
+        when(fixture.messages.findTop10BySession_IdAndRoleAndIdGreaterThanOrderByIdAsc(null, MessageRole.USER, 10L))
+                .thenReturn(remaining);
+
+        assertThat(fixture.service.rememberConversation(fixture.user, "session", null, "", true)).isTrue();
+        assertThat(fixture.session.getProfileMemoryThroughMessageId()).isEqualTo(13L);
+        verify(fixture.aiClient, times(2)).complete(anyList());
+    }
+
     private static class Fixture {
         private final UserMemoryItemRepository repository = mock(UserMemoryItemRepository.class);
         private final UserAccountRepository users = mock(UserAccountRepository.class);
