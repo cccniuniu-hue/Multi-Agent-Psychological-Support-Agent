@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.mindbridge.agent.config.MindBridgeProperties;
 import com.mindbridge.agent.domain.ChatSession;
 import com.mindbridge.agent.domain.UserMemoryItem;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +23,7 @@ public class UserMemoryChromaGateway {
 
     private static final String COLLECTIONS_PATH =
             "/api/v2/tenants/{tenant}/databases/{database}/collections";
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
 
     private final MindBridgeProperties properties;
     private final WebClient webClient;
@@ -106,33 +108,41 @@ public class UserMemoryChromaGateway {
                     .retrieve()
                     .bodyToMono(JsonNode.class)
                     .block();
-            return parseMatches(response);
+            return parseMatches(response, userId);
         } catch (Exception ignored) {
             return List.of();
         }
     }
 
-    public void delete(Long memoryId) {
-        if (!properties.getMemory().isUseChroma() || memoryId == null) {
-            return;
+    public boolean delete(Long userId, Long memoryId) {
+        if (userId == null || memoryId == null) {
+            return false;
+        }
+        if (!properties.getMemory().isUseChroma()) {
+            return true;
         }
         String ensuredCollectionId = ensureCollection();
         if (ensuredCollectionId == null) {
-            return;
+            return false;
         }
-        webClient.post()
-                .uri(COLLECTIONS_PATH + "/{collectionId}/delete",
-                        properties.getMemory().getChromaTenant(),
-                        properties.getMemory().getChromaDatabase(),
-                        ensuredCollectionId)
-                .bodyValue(Map.of("ids", List.of(chromaId(memoryId))))
-                .retrieve()
-                .toBodilessEntity()
-                .onErrorComplete()
-                .block();
+        try {
+            webClient.post()
+                    .uri(COLLECTIONS_PATH + "/{collectionId}/delete",
+                            properties.getMemory().getChromaTenant(),
+                            properties.getMemory().getChromaDatabase(),
+                            ensuredCollectionId)
+                    .bodyValue(Map.of("ids", List.of(chromaId(memoryId)),
+                            "where", Map.of("userId", String.valueOf(userId))))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block(REQUEST_TIMEOUT);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
-    private List<UserMemoryMatch> parseMatches(JsonNode response) {
+    private List<UserMemoryMatch> parseMatches(JsonNode response, Long userId) {
         if (response == null) {
             return List.of();
         }
@@ -141,7 +151,7 @@ public class UserMemoryChromaGateway {
         JsonNode distances = response.path("distances").path(0);
         for (int i = 0; i < metadatas.size(); i++) {
             Long memoryId = parseLong(metadatas.path(i).path("memoryId").asText());
-            if (memoryId != null) {
+            if (memoryId != null && String.valueOf(userId).equals(metadatas.path(i).path("userId").asText())) {
                 double score = 1.0 - distances.path(i).asDouble(1.0);
                 matches.add(new UserMemoryMatch(memoryId, score));
             }
@@ -204,7 +214,7 @@ public class UserMemoryChromaGateway {
                             "get_or_create", true))
                     .retrieve()
                     .bodyToMono(JsonNode.class)
-                    .block();
+                    .block(REQUEST_TIMEOUT);
             String resolvedId = response == null ? null : response.path("id").asText(null);
             if (resolvedId == null || resolvedId.isBlank()) {
                 return null;

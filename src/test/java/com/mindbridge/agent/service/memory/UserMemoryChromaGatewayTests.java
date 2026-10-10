@@ -32,6 +32,9 @@ class UserMemoryChromaGatewayTests {
     private UserMemoryChromaGateway gateway;
     private MindBridgeProperties properties;
     private boolean failUpsert;
+    private boolean failDelete;
+    private boolean failCollection;
+    private boolean foreignQueryResult;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -65,7 +68,7 @@ class UserMemoryChromaGatewayTests {
 
         assertThat(gateway.mirror(item)).isTrue();
         List<UserMemoryMatch> matches = gateway.query(7L, "最近复习压力很大", 4);
-        gateway.delete(23L);
+        assertThat(gateway.delete(7L, 23L)).isTrue();
 
         assertThat(requests).extracting(CapturedRequest::method).containsOnly("POST");
         assertThat(requests).extracting(CapturedRequest::path).containsExactly(
@@ -98,6 +101,7 @@ class UserMemoryChromaGatewayTests {
 
         JsonNode deleteBody = objectMapper.readTree(requests.get(3).body());
         assertThat(deleteBody.path("ids").path(0).asText()).isEqualTo("memory:23");
+        assertThat(deleteBody.path("where").path("userId").asText()).isEqualTo("7");
         assertThat(matches).singleElement().satisfies(match -> {
             assertThat(match.memoryId()).isEqualTo(23L);
             assertThat(match.score()).isEqualTo(0.85);
@@ -162,12 +166,52 @@ class UserMemoryChromaGatewayTests {
         assertThat(requests).extracting(CapturedRequest::path).noneMatch(path -> path.endsWith("/delete"));
     }
 
+    @Test
+    void deletionReportsNetworkFailureAndCanBeRetriedWithoutEmbedding() {
+        failDelete = true;
+        gateway = new UserMemoryChromaGateway(properties, WebClient.builder(), new MemoryEmbeddingClient() {
+            @Override
+            public List<Double> embed(String text) {
+                throw new AssertionError("Deleting an old index must not require embedding");
+            }
+
+            @Override
+            public String modelName() {
+                return "";
+            }
+        });
+        assertThat(gateway.delete(7L, 23L)).isFalse();
+        failDelete = false;
+        assertThat(gateway.delete(7L, 23L)).isTrue();
+    }
+
+    @Test
+    void unresolvedCollectionIsNotReportedAsSuccessfulDeletion() {
+        failCollection = true;
+        assertThat(gateway.delete(7L, 23L)).isFalse();
+        assertThat(requests).hasSize(1);
+    }
+
+    @Test
+    void disabledChromaDeletionDoesNotSendRequests() {
+        properties.getMemory().setUseChroma(false);
+        assertThat(gateway.delete(7L, 23L)).isTrue();
+        assertThat(requests).isEmpty();
+    }
+
+    @Test
+    void ignoresCrossUserQueryMetadataEvenIfRemoteFilterIsIgnored() {
+        foreignQueryResult = true;
+        assertThat(gateway.query(7L, "普通查询", 4)).isEmpty();
+    }
+
     private void handleRequest(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
         String requestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         requests.add(new CapturedRequest(exchange.getRequestMethod(), path, requestBody));
 
-        if (failUpsert && path.endsWith("/upsert")) {
+        if ((failUpsert && path.endsWith("/upsert")) || (failDelete && path.endsWith("/delete"))
+                || (failCollection && path.endsWith("/collections"))) {
             exchange.sendResponseHeaders(503, -1);
             exchange.close();
             return;
@@ -178,7 +222,7 @@ class UserMemoryChromaGatewayTests {
             responseBody = "{\"id\":\"" + COLLECTION_ID + "\",\"name\":\"mindbridge_user_memory\"}";
         } else if (path.endsWith("/query")) {
             responseBody = "{\"ids\":[[\"memory:23\"]],\"metadatas\":[[{\"memoryId\":\"23\","
-                    + "\"userId\":\"7\"}]],\"distances\":[[0.15]]}";
+                    + "\"userId\":\"" + (foreignQueryResult ? "8" : "7") + "\"}]],\"distances\":[[0.15]]}";
         } else {
             responseBody = "{}";
         }
