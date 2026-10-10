@@ -24,8 +24,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 /**
@@ -174,13 +176,9 @@ public class UserProfileMemoryService {
 
     @Transactional
     public void deleteMemory(Long userId, Long memoryId) {
-        UserMemoryItem memory = userMemoryItemRepository.findById(memoryId)
-                .orElseThrow(() -> new IllegalArgumentException("Memory item not found"));
-        if (!memory.getUser().getId().equals(userId)) {
-            throw new IllegalArgumentException("Memory item not found");
-        }
-        userMemoryChromaGateway.delete(memory.getId());
-        userMemoryItemRepository.delete(memory);
+        UserMemoryItem memory = userMemoryItemRepository.findByIdAndUser_Id(memoryId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Memory item not found"));
+        deleteStoredMemory(memory);
     }
 
     private List<UserMemoryItem> recallMemories(UserAccount user, String currentInput) {
@@ -196,11 +194,8 @@ public class UserProfileMemoryService {
                 .distinct()
                 .toList();
         Map<Long, UserMemoryItem> byId = new LinkedHashMap<>();
-        userMemoryItemRepository.findAllById(ids).forEach(item -> {
-            if (item.getUser().getId().equals(user.getId())) {
-                byId.put(item.getId(), item);
-            }
-        });
+        userMemoryItemRepository.findByUser_IdAndIdIn(user.getId(), ids)
+                .forEach(item -> byId.put(item.getId(), item));
         List<UserMemoryItem> recalled = ids.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)
@@ -313,11 +308,13 @@ public class UserProfileMemoryService {
         }
         all.stream()
                 .skip(MAX_MEMORY_ITEMS)
-                .forEach(this::deletePrunedMemory);
+                .forEach(this::deleteStoredMemory);
     }
 
-    private void deletePrunedMemory(UserMemoryItem item) {
-        userMemoryChromaGateway.delete(item.getId());
+    private void deleteStoredMemory(UserMemoryItem item) {
+        if (!userMemoryChromaGateway.delete(item.getUser().getId(), item.getId())) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "画像索引删除失败，记录已保留，请稍后重试。");
+        }
         userMemoryItemRepository.delete(item);
     }
 

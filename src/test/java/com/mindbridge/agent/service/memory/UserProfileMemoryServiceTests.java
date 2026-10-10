@@ -24,6 +24,7 @@ import com.mindbridge.agent.repository.UserAccountRepository;
 import com.mindbridge.agent.repository.UserMemoryItemRepository;
 import com.mindbridge.agent.service.PrivacySanitizer;
 import com.mindbridge.agent.service.ai.AiClient;
+import com.mindbridge.agent.service.memory.UserMemoryChromaGateway.UserMemoryMatch;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -134,6 +135,21 @@ class UserProfileMemoryServiceTests {
         assertThat(fixture.service.rememberConversation(fixture.user, "session", null, "", true)).isTrue();
         assertThat(fixture.session.getProfileMemoryThroughMessageId()).isEqualTo(13L);
         verify(fixture.aiClient, times(2)).complete(anyList());
+    }
+
+    @Test
+    void recallOnlyResolvesCurrentUsersDatabaseRowsAndIgnoresStaleIndexIds() {
+        Fixture fixture = new Fixture();
+        UserMemoryItem own = new UserMemoryItem();
+        own.setSummary("自己的稳定偏好");
+        when(fixture.chroma.query(1L, "当前问题", 6)).thenReturn(List.of(
+                new UserMemoryMatch(12L, 0.9), new UserMemoryMatch(13L, 0.8)));
+        when(fixture.repository.findByUser_IdAndIdIn(1L, List.of(12L, 13L))).thenReturn(List.of());
+        when(fixture.repository.findTop12ByUser_IdOrderByUpdatedAtDesc(1L)).thenReturn(List.of(own));
+
+        assertThat(fixture.service.profileBrief(fixture.user, "当前问题")).contains("自己的稳定偏好");
+        verify(fixture.repository).findByUser_IdAndIdIn(1L, List.of(12L, 13L));
+        verify(fixture.repository, never()).findAllById(any());
     }
 
     private static class Fixture {
