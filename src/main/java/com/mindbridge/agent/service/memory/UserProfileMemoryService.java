@@ -92,7 +92,7 @@ public class UserProfileMemoryService {
         }
         return String.join("\n", memories.stream()
                 .limit(PROFILE_BRIEF_LIMIT)
-                .map(memory -> "- %s：%s".formatted(typeLabel(memory.getType()), memory.getSummary()))
+                .map(memory -> "- %s：%s".formatted(typeLabel(memory.getType()), privacySanitizer.sanitize(memory.getSummary())))
                 .toList());
     }
 
@@ -326,7 +326,7 @@ public class UserProfileMemoryService {
         if (summary.length() < 4 || summary.length() > 80) {
             return false;
         }
-        return !containsAny(summary, "[手机号]", "[学号]", "[证件号]", "[姓名]", "诊断为", "风险等级");
+        return !containsAny(summary, "[手机号]", "[学号]", "[证件号]", "[姓名]", "[邮箱]", "[地址]", "诊断为", "风险等级");
     }
 
     private UserMemoryType parseType(String value) {
@@ -347,7 +347,7 @@ public class UserProfileMemoryService {
     }
 
     private String clean(String value) {
-        return shorten(value == null ? "" : value.replaceAll("\\s+", " ").trim(), 120);
+        return shorten(privacySanitizer.sanitize(value).replaceAll("\\s+", " ").trim(), 120);
     }
 
     private String mergeEvidence(String previous, String current) {

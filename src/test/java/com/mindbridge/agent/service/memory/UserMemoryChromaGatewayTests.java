@@ -8,6 +8,7 @@ import com.mindbridge.agent.config.MindBridgeProperties;
 import com.mindbridge.agent.domain.UserAccount;
 import com.mindbridge.agent.domain.UserMemoryItem;
 import com.mindbridge.agent.domain.UserMemoryType;
+import com.mindbridge.agent.service.PrivacySanitizer;
 import com.mindbridge.agent.service.memory.UserMemoryChromaGateway.UserMemoryMatch;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -28,6 +29,8 @@ class UserMemoryChromaGatewayTests {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<CapturedRequest> requests = new CopyOnWriteArrayList<>();
+    private final List<String> embeddingInputs = new CopyOnWriteArrayList<>();
+    private final PrivacySanitizer sanitizer = new PrivacySanitizer();
     private HttpServer server;
     private UserMemoryChromaGateway gateway;
     private MindBridgeProperties properties;
@@ -46,7 +49,7 @@ class UserMemoryChromaGatewayTests {
         properties.getMemory().setUseChroma(true);
         properties.getMemory().setChromaBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
         properties.getMemory().setChromaCollection("mindbridge_user_memory");
-        gateway = new UserMemoryChromaGateway(properties, WebClient.builder(), new TestMemoryEmbeddingClient());
+        gateway = new UserMemoryChromaGateway(properties, WebClient.builder(), new TestMemoryEmbeddingClient(), sanitizer);
     }
 
     @AfterEach
@@ -119,7 +122,7 @@ class UserMemoryChromaGatewayTests {
         item.setType(UserMemoryType.SUPPORT_NEED);
         item.setSummary("敏感画像内容");
         gateway = new UserMemoryChromaGateway(properties, WebClient.builder(),
-                new ConfiguredMemoryEmbeddingClient(properties, WebClient.builder()));
+                new ConfiguredMemoryEmbeddingClient(properties, WebClient.builder()), sanitizer);
 
         assertThat(gateway.mirror(item)).isFalse();
         assertThat(gateway.query(7L, "敏感查询", 4)).isEmpty();
@@ -145,7 +148,7 @@ class UserMemoryChromaGatewayTests {
             public String modelName() {
                 return "private-test-model";
             }
-        });
+        }, sanitizer);
 
         assertThat(gateway.mirror(item)).isFalse();
         assertThat(gateway.query(7L, "画像查询", 4)).isEmpty();
@@ -179,7 +182,7 @@ class UserMemoryChromaGatewayTests {
             public String modelName() {
                 return "";
             }
-        });
+        }, sanitizer);
         assertThat(gateway.delete(7L, 23L)).isFalse();
         failDelete = false;
         assertThat(gateway.delete(7L, 23L)).isTrue();
@@ -203,6 +206,26 @@ class UserMemoryChromaGatewayTests {
     void ignoresCrossUserQueryMetadataEvenIfRemoteFilterIsIgnored() {
         foreignQueryResult = true;
         assertThat(gateway.query(7L, "普通查询", 4)).isEmpty();
+    }
+
+    @Test
+    void sanitizesLegacyDocumentsAndQueriesBeforeTheyLeaveTheApplication() throws Exception {
+        UserAccount user = new UserAccount();
+        ReflectionTestUtils.setField(user, "id", 7L);
+        UserMemoryItem item = new UserMemoryItem();
+        ReflectionTestUtils.setField(item, "id", 23L);
+        item.setUser(user);
+        item.setSummary("喜欢通过 student@example.test 接收简短回复");
+        item.setEvidence("电话13800000000，姓名：示例甲，地址：示例路0号");
+        assertThat(gateway.mirror(item)).isTrue();
+        gateway.query(7L, "我的邮箱是 student@example.test", 4);
+
+        assertThat(String.join("\n", embeddingInputs)).doesNotContain("student@example.test", "13800000000", "示例甲", "示例路0号")
+                .contains("[邮箱]", "[手机号]", "[姓名]", "[地址]");
+        JsonNode upsert = objectMapper.readTree(requests.get(1).body());
+        assertThat(upsert.path("documents").path(0).asText()).contains("[邮箱]", "[手机号]")
+                .doesNotContain("student@example.test", "13800000000");
+        assertThat(item.getSummary()).contains("student@example.test");
     }
 
     private void handleRequest(HttpExchange exchange) throws IOException {
@@ -237,9 +260,10 @@ class UserMemoryChromaGatewayTests {
     private record CapturedRequest(String method, String path, String body) {
     }
 
-    private static class TestMemoryEmbeddingClient implements MemoryEmbeddingClient {
+    private class TestMemoryEmbeddingClient implements MemoryEmbeddingClient {
         @Override
         public List<Double> embed(String text) {
+            embeddingInputs.add(text);
             return List.of(0.1, 0.2, 0.3);
         }
 

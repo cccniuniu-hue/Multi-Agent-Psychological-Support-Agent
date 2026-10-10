@@ -1080,7 +1080,7 @@ async function deleteUserMemory(memoryId) {
     });
     await loadUserMemories();
   } catch (error) {
-    els.userMemoryState.textContent = "删除失败";
+    els.userMemoryState.textContent = "删除未完成，请刷新画像后重试";
   }
 }
 

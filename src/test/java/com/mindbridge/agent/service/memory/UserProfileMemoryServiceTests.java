@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class UserProfileMemoryServiceTests {
 
@@ -150,6 +151,48 @@ class UserProfileMemoryServiceTests {
         assertThat(fixture.service.profileBrief(fixture.user, "当前问题")).contains("自己的稳定偏好");
         verify(fixture.repository).findByUser_IdAndIdIn(1L, List.of(12L, 13L));
         verify(fixture.repository, never()).findAllById(any());
+    }
+
+    @Test
+    void sanitizesModelEvidenceAndPreviouslyStoredEvidenceBeforeSavingAndMirroring() {
+        Fixture fixture = new Fixture();
+        UserMemoryItem existing = new UserMemoryItem();
+        existing.setSummary("偏好简短直接回复");
+        existing.setEvidence("电话13800000000");
+        fixture.memories.add(existing);
+        when(fixture.aiClient.complete(anyList())).thenReturn("""
+                [{"type":"PREFERENCE","summary":"偏好简短直接回复", "confidence":0.9,
+                  "evidence":"邮箱student@example.test，姓名：示例甲，地址：示例路0号"}]
+                """);
+        fixture.service.rememberUserInput(fixture.user, new ChatSession(), "请记住我喜欢简短直接回复。", "");
+
+        ArgumentCaptor<UserMemoryItem> saved = ArgumentCaptor.forClass(UserMemoryItem.class);
+        verify(fixture.repository).save(saved.capture());
+        verify(fixture.chroma).mirror(saved.getValue());
+        assertThat(saved.getValue().getEvidence()).doesNotContain("13800000000", "student@example.test", "示例甲", "示例路0号")
+                .contains("[手机号]", "[邮箱]", "[姓名]", "[地址]");
+    }
+
+    @Test
+    void doesNotPersistIdentifierOnlyModelSummaries() {
+        Fixture fixture = new Fixture();
+        when(fixture.aiClient.complete(anyList())).thenReturn("""
+                [{"type":"PERSONAL_CONTEXT","summary":"联系邮箱student@example.test","evidence":"邮箱student@example.test","confidence":0.9}]
+                """);
+        fixture.service.rememberUserInput(fixture.user, new ChatSession(), "请记住我的联系方式。", "");
+        verify(fixture.repository, never()).save(any(UserMemoryItem.class));
+        verify(fixture.chroma, never()).mirror(any());
+    }
+
+    @Test
+    void sanitizesLegacyProfileBriefWithoutRewritingStoredHistory() {
+        Fixture fixture = new Fixture();
+        UserMemoryItem legacy = new UserMemoryItem();
+        legacy.setSummary("通过 student@example.test 联系");
+        when(fixture.repository.findTop12ByUser_IdOrderByUpdatedAtDesc(1L)).thenReturn(List.of(legacy));
+        assertThat(fixture.service.profileBrief(fixture.user)).contains("[邮箱]").doesNotContain("student@example.test");
+        assertThat(legacy.getSummary()).contains("student@example.test");
+        verify(fixture.repository, never()).save(any(UserMemoryItem.class));
     }
 
     private static class Fixture {
