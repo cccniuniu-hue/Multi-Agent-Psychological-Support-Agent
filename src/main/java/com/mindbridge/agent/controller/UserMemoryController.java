@@ -2,6 +2,7 @@ package com.mindbridge.agent.controller;
 
 import com.mindbridge.agent.dto.UserMemoryItemResponse;
 import com.mindbridge.agent.security.CurrentUser;
+import com.mindbridge.agent.service.PrivacySanitizer;
 import com.mindbridge.agent.service.memory.UserProfileMemoryService;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -23,15 +24,17 @@ import reactor.core.scheduler.Schedulers;
 public class UserMemoryController {
 
     private final UserProfileMemoryService userProfileMemoryService;
+    private final PrivacySanitizer privacySanitizer;
 
-    public UserMemoryController(UserProfileMemoryService userProfileMemoryService) {
+    public UserMemoryController(UserProfileMemoryService userProfileMemoryService, PrivacySanitizer privacySanitizer) {
         this.userProfileMemoryService = userProfileMemoryService;
+        this.privacySanitizer = privacySanitizer;
     }
 
     @GetMapping
     public Mono<List<UserMemoryItemResponse>> memories(@AuthenticationPrincipal CurrentUser currentUser) {
         return Mono.fromCallable(() -> userProfileMemoryService.memoriesForUser(currentUser.getId()).stream()
-                .map(UserMemoryItemResponse::from)
+                .map(item -> UserMemoryItemResponse.from(item, privacySanitizer))
                 .toList()).subscribeOn(Schedulers.boundedElastic());
     }
 

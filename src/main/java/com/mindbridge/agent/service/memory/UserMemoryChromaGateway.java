@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.mindbridge.agent.config.MindBridgeProperties;
 import com.mindbridge.agent.domain.ChatSession;
 import com.mindbridge.agent.domain.UserMemoryItem;
+import com.mindbridge.agent.service.PrivacySanitizer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,16 +29,19 @@ public class UserMemoryChromaGateway {
     private final MindBridgeProperties properties;
     private final WebClient webClient;
     private final MemoryEmbeddingClient embeddingClient;
+    private final PrivacySanitizer privacySanitizer;
     private volatile String collectionId;
 
     public UserMemoryChromaGateway(
             MindBridgeProperties properties,
             WebClient.Builder webClientBuilder,
-            MemoryEmbeddingClient embeddingClient
+            MemoryEmbeddingClient embeddingClient,
+            PrivacySanitizer privacySanitizer
     ) {
         this.properties = properties;
         this.webClient = webClientBuilder.baseUrl(properties.getMemory().getChromaBaseUrl()).build();
         this.embeddingClient = embeddingClient;
+        this.privacySanitizer = privacySanitizer;
     }
 
     public boolean mirror(UserMemoryItem item) {
@@ -177,12 +181,12 @@ public class UserMemoryChromaGateway {
         String evidence = item.getEvidence() == null || item.getEvidence().isBlank()
                 ? ""
                 : "\n证据：" + item.getEvidence();
-        return "%s：%s%s".formatted(item.getType().name(), item.getSummary(), evidence);
+        return privacySanitizer.sanitize("%s：%s%s".formatted(item.getType().name(), item.getSummary(), evidence));
     }
 
     private List<Double> safeEmbedding(String text) {
         try {
-            return embeddingClient.embed(text);
+            return embeddingClient.embed(privacySanitizer.sanitize(text));
         } catch (Exception ignored) {
             return List.of();
         }

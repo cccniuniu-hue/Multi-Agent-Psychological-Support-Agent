@@ -101,6 +101,19 @@ class UserMemoryApiTests {
         verifyNoInteractions(chroma);
     }
 
+    @Test
+    void legacyMemoryResponsesMaskIdentifiersWithoutMutatingDatabaseRows() {
+        UserMemoryItem legacy = memory("student", "偏好通过 student@example.test 接收通知");
+        legacy.setEvidence("电话13800000000，学号：SYNTHETIC001，姓名：示例甲，地址：示例路0号");
+        memories.save(legacy);
+        client.get().uri("/api/profile/memory")
+                .headers(headers -> headers.setBasicAuth("student", "student123"))
+                .exchange().expectStatus().isOk().expectBody()
+                .jsonPath("$[0].summary").isEqualTo("偏好通过 [邮箱] 接收通知")
+                .jsonPath("$[0].evidence").isEqualTo("电话[手机号]，学号:[学号]，姓名：[姓名]，地址：[地址]");
+        assertThat(memories.findById(legacy.getId()).orElseThrow().getSummary()).contains("student@example.test");
+    }
+
     private UserMemoryItem memory(String username, String summary) {
         UserAccount owner = users.findByUsername(username).orElseThrow();
         UserMemoryItem item = new UserMemoryItem();

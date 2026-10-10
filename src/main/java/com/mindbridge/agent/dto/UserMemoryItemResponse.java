@@ -2,6 +2,7 @@ package com.mindbridge.agent.dto;
 
 import com.mindbridge.agent.domain.UserMemoryItem;
 import com.mindbridge.agent.domain.UserMemoryType;
+import com.mindbridge.agent.service.PrivacySanitizer;
 import java.time.Instant;
 
 /**
@@ -17,12 +18,12 @@ public record UserMemoryItemResponse(
         Instant updatedAt,
         Instant lastSeenAt
 ) {
-    public static UserMemoryItemResponse from(UserMemoryItem item) {
+    public static UserMemoryItemResponse from(UserMemoryItem item, PrivacySanitizer privacySanitizer) {
         return new UserMemoryItemResponse(
                 item.getId(),
                 item.getType(),
-                item.getSummary(),
-                item.getEvidence(),
+                privacySanitizer.sanitize(item.getSummary()),
+                privacySanitizer.sanitize(item.getEvidence()),
                 item.getConfidence(),
                 item.getCreatedAt(),
                 item.getUpdatedAt(),
