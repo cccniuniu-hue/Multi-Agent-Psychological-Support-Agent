@@ -130,7 +130,8 @@ class AgentApplicationTests {
                         AgentName.MEMORY_AGENT,
                         AgentAction.READ_MEMORY,
                         "loaded short-term memory",
-                        startedAt))
+                        startedAt)),
+                false
         );
 
         String traceId = agentRunTraceService

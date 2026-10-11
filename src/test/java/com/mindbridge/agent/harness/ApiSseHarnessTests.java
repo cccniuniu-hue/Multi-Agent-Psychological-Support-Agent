@@ -195,6 +195,41 @@ class ApiSseHarnessTests {
     }
 
     @Test
+    void noEvidenceStillGivesExplicitUncertaintyWhenModelOmitsIt() {
+        when(aiClient.stream(anyList())).thenReturn(Flux.just("证据不足验证回复：先和信任的人聊聊。"));
+
+        String body = postChat("student", "student123", "最近焦虑，学校心理中心如何预约？");
+
+        assertThat(body).contains("检索证据不足", "一般支持建议").doesNotContain("检索参考来源");
+        assertThat(messageRepository.findAll().stream()
+                .filter(message -> message.getRole() == MessageRole.ASSISTANT)
+                .filter(message -> message.getContent().startsWith("证据不足验证回复")))
+                .singleElement().satisfies(message -> assertThat(message.getContent()).contains("检索证据不足"));
+    }
+
+    @Test
+    void matchingDocumentIsNotAutomaticallyConsideredSufficient() {
+        when(knowledgeService.retrieve(anyString(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(
+                new SearchResult(44L, "general-guide.md", "可与信任的人交流。", 0.9)));
+        when(aiClient.complete(anyList())).thenAnswer(invocation -> {
+            List<AiMessage> messages = invocation.getArgument(0);
+            return messages.get(0).content().contains("判断检索结果是否足以")
+                    ? "INSUFFICIENT" : scriptedAiClient.complete(messages);
+        });
+        when(aiClient.stream(anyList())).thenReturn(Flux.just("部分证据验证回复：先和信任的人聊聊。"));
+
+        String body = postChat("student", "student123", "最近焦虑，学校心理中心几点开门？");
+
+        assertThat(body).contains("检索证据不足", "general-guide.md", "片段 #44");
+        ArgumentCaptor<List<AiMessage>> prompts = ArgumentCaptor.forClass(List.class);
+        verify(aiClient).stream(prompts.capture());
+        assertThat(prompts.getValue()).anySatisfy(message -> {
+            assertThat(message.role()).isEqualTo("system");
+            assertThat(message.content()).contains("本轮检索证据不足", "高风险时优先当前安全");
+        });
+    }
+
+    @Test
     void studentCanEndOwnedSessionAndFlushPendingProfileMemory() {
         ChatSession session = createSession("student");
         when(userProfileMemoryService.rememberConversation(any(UserAccount.class), eq(session.getPublicId()),

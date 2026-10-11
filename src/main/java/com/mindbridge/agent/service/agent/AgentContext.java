@@ -37,6 +37,7 @@ public class AgentContext {
     private boolean memoryLoaded;
     private boolean intentRouted;
     private boolean knowledgeHandled;
+    private boolean knowledgeSufficient;
     private boolean riskAssessed;
     private boolean responsePlanned;
     private boolean finished;
@@ -182,6 +183,14 @@ public class AgentContext {
 
     public void markKnowledgeHandled() {
         this.knowledgeHandled = true;
+    }
+
+    public boolean knowledgeSufficient() {
+        return knowledgeSufficient;
+    }
+
+    public void setKnowledgeSufficient(boolean knowledgeSufficient) {
+        this.knowledgeSufficient = knowledgeSufficient;
     }
 
     public boolean riskAssessed() {

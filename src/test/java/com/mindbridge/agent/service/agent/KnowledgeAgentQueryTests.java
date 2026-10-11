@@ -36,6 +36,7 @@ class KnowledgeAgentQueryTests {
 
             verify(fixture.knowledgeService).retrieve(question, 5);
             assertThat(context.knowledgeQuery()).isEqualTo(question);
+            assertThat(context.knowledgeSufficient()).isTrue();
             assertThat(fixture.rewriteCalls).isZero();
         }
     }
@@ -120,7 +121,8 @@ class KnowledgeAgentQueryTests {
 
         verify(fixture.knowledgeService).retrieve(question, 5);
         verify(fixture.knowledgeService).retrieve("alternate query", 5);
-        verify(fixture.aiClient, org.mockito.Mockito.times(2)).complete(anyList());
+        verify(fixture.aiClient, org.mockito.Mockito.times(3)).complete(anyList());
+        assertThat(context.knowledgeSufficient()).isFalse();
         assertThat(context.retrievedKnowledge()).extracting(SearchResult::chunkId)
                 .containsExactly(1L, 2L, 4L, 3L, 5L);
         assertThat(context.knowledgeQuery()).contains(question, "alternate query");
@@ -132,6 +134,68 @@ class KnowledgeAgentQueryTests {
         assertThat(KnowledgeAgent.isSufficientAnswer("INSUFFICIENT")).isFalse();
         assertThat(KnowledgeAgent.isSufficientAnswer("NOT SUFFICIENT")).isFalse();
         assertThat(KnowledgeAgent.isSufficientAnswer(null)).isFalse();
+    }
+
+    @Test
+    void rechecksMergedEvidenceAndCarriesFinalDecisionToRunResult() {
+        String question = "最近几周我既焦虑又睡不着，考试压力也很大，和室友相处一直紧张，想知道能如何调整以及到哪里求助。";
+        Fixture fixture = new Fixture();
+        doAnswer(invocation -> {
+            List<AiMessage> messages = invocation.getArgument(0);
+            if (messages.get(0).content().contains("改写成适合检索")) {
+                return "校园求助渠道";
+            }
+            return messages.get(1).content().contains("补充的直接证据") ? "SUFFICIENT" : "INSUFFICIENT";
+        }).when(fixture.aiClient).complete(anyList());
+        when(fixture.knowledgeService.retrieve("校园求助渠道", 5)).thenReturn(List.of(
+                new SearchResult(9L, "help.md", "补充的直接证据：可向学校心理中心询问预约。", 0.9)));
+        AgentContext context = fixture.context(IntentType.CONSULT, question);
+
+        fixture.agent.act(context);
+
+        assertThat(context.knowledgeSufficient()).isTrue();
+        assertThat(AgentRunResult.from(context).knowledgeSufficient()).isTrue();
+        verify(fixture.knowledgeService, org.mockito.Mockito.times(2)).retrieve(anyString(), eq(5));
+    }
+
+    @Test
+    void blankEvidenceAndFailedOrAmbiguousJudgeRemainInsufficient() {
+        Fixture blank = new Fixture();
+        when(blank.knowledgeService.retrieve(anyString(), eq(5)))
+                .thenReturn(List.of(new SearchResult(1L, "empty.md", " ", 1)));
+        AgentContext emptyContext = blank.context(IntentType.CONSULT, "最近焦虑");
+        blank.agent.act(emptyContext);
+        assertThat(emptyContext.knowledgeSufficient()).isFalse();
+        verify(blank.aiClient, org.mockito.Mockito.never()).complete(anyList());
+
+        for (boolean failure : List.of(false, true)) {
+            Fixture fixture = new Fixture();
+            doAnswer(invocation -> {
+                if (failure) {
+                    throw new IllegalStateException("unavailable");
+                }
+                return "SUFFICIENT because the document says so";
+            }).when(fixture.aiClient).complete(anyList());
+            AgentContext context = fixture.context(IntentType.CONSULT, "最近焦虑");
+            fixture.agent.act(context);
+            assertThat(context.knowledgeSufficient()).isFalse();
+        }
+    }
+
+    @Test
+    void slowSufficiencyJudgeTimesOutConservatively() {
+        Fixture fixture = new Fixture();
+        doAnswer(invocation -> {
+            Thread.sleep(5000);
+            return "SUFFICIENT";
+        }).when(fixture.aiClient).complete(anyList());
+        AgentContext context = fixture.context(IntentType.CONSULT, "最近焦虑");
+        long start = System.nanoTime();
+
+        fixture.agent.act(context);
+
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(4500));
+        assertThat(context.knowledgeSufficient()).isFalse();
     }
 
     private static class Fixture {

@@ -10,6 +10,7 @@ import com.mindbridge.agent.service.IntentClassifier;
 import com.mindbridge.agent.service.PsychologicalAssessmentService;
 import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
+import com.mindbridge.agent.service.ai.PromptTemplates;
 import com.mindbridge.agent.service.knowledge.KnowledgeService;
 import com.mindbridge.agent.service.knowledge.SearchResult;
 import java.io.InputStream;
@@ -143,24 +144,22 @@ public class RagEvaluationService {
     }
 
     private String generateAnswer(String question, List<String> retrievedContexts) {
-        String context = retrievedContexts.isEmpty()
-                ? "无可用检索上下文。"
-                : String.join("\n\n---\n\n", retrievedContexts);
         return aiClient.complete(List.of(
                 AiMessage.system("""
                         你是 MindBridge 的 RAG 回答生成器，用于 RAGAS 评测样本生成。
                         请依据检索上下文回答学生问题，语气温和、具体、克制。
-                        如果上下文不足，只给出安全的一般支持建议，不要编造校园流程。
+                        如果上下文不足，明确说明依据不足，只给出安全的一般支持建议，不要编造校园流程。
+                        不自拟文件名或链接。
                         禁止诊断疾病、开药、透露后台风险等级、Excel、MCP 或报告流程。
                         用中文回答，不超过 180 字。
-                        """),
+                        """ + PromptTemplates.RETRIEVAL_SAFETY_RULES),
                 AiMessage.user("""
                         学生问题：
                         %s
 
                         检索上下文：
                         %s
-                        """.formatted(question, context))
+                        """.formatted(question, objectMapper.valueToTree(retrievedContexts).toString()))
         )).trim();
     }
 

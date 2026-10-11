@@ -4,6 +4,8 @@ import com.mindbridge.agent.config.MindBridgeProperties;
 import com.mindbridge.agent.domain.IntentType;
 import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
+import com.mindbridge.agent.service.ai.PromptTemplates;
+import com.mindbridge.agent.service.knowledge.KnowledgeEvidence;
 import com.mindbridge.agent.service.knowledge.KnowledgeService;
 import com.mindbridge.agent.service.knowledge.SearchResult;
 import java.time.Duration;
@@ -23,7 +25,7 @@ import reactor.core.scheduler.Schedulers;
 @Component
 public class KnowledgeAgent implements MindBridgeAgent {
 
-    private static final Duration QUERY_REWRITE_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration KNOWLEDGE_MODEL_TIMEOUT = Duration.ofSeconds(3);
 
     private final KnowledgeService knowledgeService;
     private final MindBridgeProperties properties;
@@ -53,20 +55,23 @@ public class KnowledgeAgent implements MindBridgeAgent {
         int topK = properties.getKnowledge().getTopK();
         List<SearchResult> retrieved = knowledgeService.retrieve(original, topK);
         String query = original;
-        if (isComplexConsultation(context) && !isKnowledgeEnough(context, retrieved)) {
+        boolean sufficient = isKnowledgeEnough(context, retrieved);
+        if (isComplexConsultation(context) && !sufficient) {
             String rewritten = rewriteQuery(context);
             if (!rewritten.equals(original)) {
                 List<SearchResult> second = knowledgeService.retrieve(rewritten, topK);
                 retrieved = mergeResults(retrieved, second, topK);
                 query = keepOriginal(original, rewritten);
+                sufficient = isKnowledgeEnough(context, retrieved);
             }
         }
         context.setKnowledgeQuery(query);
         context.setRetrievedKnowledge(retrieved);
+        context.setKnowledgeSufficient(sufficient);
         context.markKnowledgeHandled();
         return AgentDecision.continueWith(
                 AgentAction.RETRIEVE_KNOWLEDGE,
-                "query=%s; retrieved=%d".formatted(query, retrieved.size()));
+                "query=%s; retrieved=%d; evidenceSufficient=%s".formatted(query, retrieved.size(), sufficient));
     }
 
     private List<SearchResult> mergeResults(List<SearchResult> original, List<SearchResult> rewritten, int topK) {
@@ -112,7 +117,7 @@ public class KnowledgeAgent implements MindBridgeAgent {
                             你的任务是把学生输入改写成适合检索校园心理知识库的中文查询词。
                             只输出查询词本身，不要解释，不要超过 40 个字。
                             聚焦心理支持、校园求助流程、风险处理或情绪调节知识。
-                            """),
+                            """ + PromptTemplates.RETRIEVAL_SAFETY_RULES),
                     AiMessage.user("""
                             记忆摘要：
                             %s
@@ -124,23 +129,26 @@ public class KnowledgeAgent implements MindBridgeAgent {
     }
 
     private boolean isKnowledgeEnough(AgentContext context, List<SearchResult> results) {
-        if (results.isEmpty()) {
+        String evidence = KnowledgeEvidence.format(results);
+        if (evidence.equals("[]")) {
             return false;
         }
         try {
-            String decision = aiClient.complete(List.of(
+            String decision = completeWithTimeout(List.of(
                     AiMessage.system("""
                             你是 MindBridge 的 KnowledgeAgent。
                             判断检索结果是否足以支持后续心理关怀回答。
+                            命中片段不等于证据充分。核对是否直接回答当前问题，是否缺少关键条件或出现相互矛盾的内容。
+                            具体校园流程、电话、时间或数据必须有明确依据；不相关、空白或无法判断时均视为不足。
                             只输出 SUFFICIENT 或 INSUFFICIENT。
-                            """),
+                            """ + PromptTemplates.RETRIEVAL_SAFETY_RULES),
                     AiMessage.user("""
                             当前输入：
                             %s
 
                             检索结果：
                             %s
-                            """.formatted(context.modelInput(), formatResults(results)))
+                            """.formatted(context.modelInput(), evidence))
             ));
             return isSufficientAnswer(decision);
         } catch (Exception ignored) {
@@ -154,24 +162,17 @@ public class KnowledgeAgent implements MindBridgeAgent {
 
     private String completeQueryRewrite(List<AiMessage> messages, String fallback) {
         try {
-            // ponytail: this bounds waiting; a non-interruptible upstream request may finish later.
-            String answer = Mono.fromCallable(() -> aiClient.complete(messages))
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .block(QUERY_REWRITE_TIMEOUT);
-            return normalizeQuery(answer, fallback);
+            return normalizeQuery(completeWithTimeout(messages), fallback);
         } catch (RuntimeException ignored) {
             return fallback;
         }
     }
 
-    private String formatResults(List<SearchResult> results) {
-        if (results.isEmpty()) {
-            return "无";
-        }
-        return String.join("\n", results.stream()
-                .limit(4)
-                .map(result -> "- " + result.content())
-                .toList());
+    private String completeWithTimeout(List<AiMessage> messages) {
+        // shortcut: 超时只限制等待；不可中断的上游请求可能稍后结束。
+        return Mono.fromCallable(() -> aiClient.complete(messages))
+                .subscribeOn(Schedulers.boundedElastic())
+                .block(KNOWLEDGE_MODEL_TIMEOUT);
     }
 
     private String normalizeQuery(String value, String fallback) {

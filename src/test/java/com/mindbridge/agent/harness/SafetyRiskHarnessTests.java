@@ -87,12 +87,10 @@ class SafetyRiskHarnessTests {
         AiMessage consultPrompt = PromptTemplates.answerSystemPrompt(
                 IntentType.CONSULT,
                 RiskLevel.MEDIUM,
-                "学校心理中心和辅导员可以提供支持。",
                 "Demo Student");
         AiMessage highRiskPrompt = PromptTemplates.answerSystemPrompt(
                 IntentType.RISK,
                 RiskLevel.HIGH,
-                "危机安全计划：联系可信任的人和学校心理中心。",
                 "Demo Student");
 
         assertThat(consultPrompt.content())

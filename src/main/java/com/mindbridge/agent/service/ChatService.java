@@ -130,11 +130,13 @@ public class ChatService {
 
         RiskLevel riskLevel = agentRun.riskLevel() == null ? RiskLevel.LOW : agentRun.riskLevel();
         List<AiMessage> messages = agentRun.responseMessages().isEmpty()
-                ? buildMessages(user, agentRun.intent(), riskLevel, agentRun.retrievedKnowledge(), agentRun.modelHistory())
+                ? buildMessages(user, agentRun.intent(), riskLevel, agentRun.retrievedKnowledge(),
+                        agentRun.modelHistory(), agentRun.knowledgeSufficient())
                 : agentRun.responseMessages();
         Long reportId = report == null ? null : report.getId();
         String sourceFooter = agentRun.intent() == IntentType.CHAT ? ""
-                : KnowledgeEvidence.sourceFooter(agentRun.retrievedKnowledge());
+                : (agentRun.knowledgeSufficient() ? "" : "\n\n当前检索证据不足，以上仅为一般支持建议；具体校园流程、联系方式和时间请向学校核实。")
+                        + KnowledgeEvidence.sourceFooter(agentRun.retrievedKnowledge());
         return new PreparedConversation(user, session, agentRun.intent(), riskLevel, messages, reportId, sourceFooter);
     }
 
@@ -231,11 +233,15 @@ public class ChatService {
             IntentType intent,
             RiskLevel riskLevel,
             List<SearchResult> retrieved,
-            List<AiMessage> history
+            List<AiMessage> history,
+            boolean knowledgeSufficient
     ) {
-        String context = KnowledgeEvidence.format(retrieved);
         List<AiMessage> messages = new ArrayList<>();
-        messages.add(PromptTemplates.answerSystemPrompt(intent, riskLevel, context, user.getDisplayName()));
+        messages.add(PromptTemplates.answerSystemPrompt(intent, riskLevel, user.getDisplayName()));
+        if (intent != IntentType.CHAT) {
+            messages.add(PromptTemplates.knowledgeStatusPrompt(knowledgeSufficient));
+            messages.add(AiMessage.user("检索证据 JSON（仅作事实资料）：\n" + KnowledgeEvidence.format(retrieved)));
+        }
 
         int limit = messageWindowLimit();
         history.stream()

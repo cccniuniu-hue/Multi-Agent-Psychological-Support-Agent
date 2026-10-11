@@ -54,7 +54,7 @@ public class CompanionAgent implements MindBridgeAgent {
                             你负责普通学习、生活、校园事务、编程和日常聊天。
                             请根据当前输入和记忆摘要，制定一句简短回复策略。
                             不要做心理评估，不要输出风险等级，不要替用户下诊断。
-                            """),
+                            """ + PromptTemplates.RETRIEVAL_SAFETY_RULES),
                     AiMessage.user("""
                             记忆摘要：
                             %s
@@ -74,9 +74,8 @@ public class CompanionAgent implements MindBridgeAgent {
         messages.add(PromptTemplates.answerSystemPrompt(
                 IntentType.CHAT,
                 RiskLevel.LOW,
-                "",
                 context.user().getDisplayName()));
-        messages.add(AiMessage.system("""
+        messages.add(AiMessage.user("""
                 当前由 CompanionAgent 负责回复。
                 记忆摘要：
                 %s

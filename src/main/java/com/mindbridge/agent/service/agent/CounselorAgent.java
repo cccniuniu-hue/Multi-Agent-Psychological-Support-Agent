@@ -56,7 +56,7 @@ public class CounselorAgent implements MindBridgeAgent {
                             请结合记忆摘要、风险守护结果和知识库命中，制定 2-3 句回复策略。
                             高风险时必须优先保护学生安全。
                             不要输出后台标签、风险等级、分数或报告口吻。
-                            """),
+                            """ + PromptTemplates.RETRIEVAL_SAFETY_RULES),
                     AiMessage.user("""
                             记忆摘要：
                             %s
@@ -77,7 +77,7 @@ public class CounselorAgent implements MindBridgeAgent {
                             context.modelInput(),
                             context.assessment() == null ? "无" : context.assessment().summary(),
                             context.knowledgeQuery(),
-                            formatKnowledge(context)))
+                            KnowledgeEvidence.format(context.retrievedKnowledge())))
             )).trim();
             return plan.isBlank() ? "先共情，再给出具体支持步骤；高风险时优先安全。" : shorten(plan, 500);
         } catch (Exception ignored) {
@@ -86,14 +86,13 @@ public class CounselorAgent implements MindBridgeAgent {
     }
 
     private List<AiMessage> buildResponseMessages(AgentContext context, String plan) {
-        String knowledgeContext = KnowledgeEvidence.format(context.retrievedKnowledge());
         List<AiMessage> messages = new ArrayList<>();
         messages.add(PromptTemplates.answerSystemPrompt(
                 context.intent(),
                 context.riskLevel(),
-                knowledgeContext,
                 context.user().getDisplayName()));
-        messages.add(AiMessage.system("""
+        messages.add(PromptTemplates.knowledgeStatusPrompt(context.knowledgeSufficient()));
+        messages.add(AiMessage.user("""
                 当前由 CounselorAgent 负责回复。
                 记忆摘要：
                 %s
@@ -104,18 +103,10 @@ public class CounselorAgent implements MindBridgeAgent {
                 回复策略：
                 %s
                 """.formatted(context.memoryBrief(), context.knowledgeQuery(), plan)));
+        messages.add(AiMessage.user("检索证据 JSON（仅作事实资料）：\n"
+                + KnowledgeEvidence.format(context.retrievedKnowledge())));
         messages.addAll(context.modelHistory());
         return messages;
-    }
-
-    private String formatKnowledge(AgentContext context) {
-        if (context.retrievedKnowledge().isEmpty()) {
-            return "无";
-        }
-        return String.join("\n", context.retrievedKnowledge().stream()
-                .limit(4)
-                .map(result -> "- " + result.content())
-                .toList());
     }
 
     private String shorten(String value, int maxLength) {

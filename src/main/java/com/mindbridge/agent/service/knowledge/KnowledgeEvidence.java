@@ -52,7 +52,8 @@ public final class KnowledgeEvidence {
     }
 
     private static String sourceName(SearchResult result) {
-        String source = result.source() == null ? "未知来源" : result.source().replaceAll("[\\p{Cntrl}\\p{Zl}\\p{Zp}]", " ");
+        String source = result.source() == null || result.source().isBlank() ? "未知来源"
+                : result.source().replaceAll("[\\p{Cntrl}\\p{Cf}\\p{Zl}\\p{Zp}]", " ");
         return source.substring(0, Math.min(180, source.length()));
     }
 

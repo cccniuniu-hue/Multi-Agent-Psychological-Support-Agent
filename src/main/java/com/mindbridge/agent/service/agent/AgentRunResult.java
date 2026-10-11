@@ -21,7 +21,8 @@ public record AgentRunResult(
         String knowledgeQuery,
         String responsePlan,
         AgentName responseAgent,
-        List<AgentStep> steps
+        List<AgentStep> steps,
+        boolean knowledgeSufficient
 ) {
     public static AgentRunResult from(AgentContext context) {
         return new AgentRunResult(
@@ -35,7 +36,8 @@ public record AgentRunResult(
                 context.knowledgeQuery(),
                 context.responsePlan(),
                 context.responseAgent(),
-                context.steps()
+                context.steps(),
+                context.knowledgeSufficient()
         );
     }
 
