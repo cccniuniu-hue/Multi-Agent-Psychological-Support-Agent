@@ -4,6 +4,7 @@ import com.mindbridge.agent.domain.IntentType;
 import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
 import com.mindbridge.agent.service.ai.PromptTemplates;
+import com.mindbridge.agent.service.knowledge.KnowledgeEvidence;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Component;
@@ -85,9 +86,7 @@ public class CounselorAgent implements MindBridgeAgent {
     }
 
     private List<AiMessage> buildResponseMessages(AgentContext context, String plan) {
-        String knowledgeContext = String.join("\n\n", context.retrievedKnowledge().stream()
-                .map(result -> "- [" + result.source() + "] " + result.content())
-                .toList());
+        String knowledgeContext = KnowledgeEvidence.format(context.retrievedKnowledge());
         List<AiMessage> messages = new ArrayList<>();
         messages.add(PromptTemplates.answerSystemPrompt(
                 context.intent(),

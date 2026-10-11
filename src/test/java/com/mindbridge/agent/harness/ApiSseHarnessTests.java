@@ -10,14 +10,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.mindbridge.agent.domain.ChatSession;
+import com.mindbridge.agent.domain.MessageRole;
 import com.mindbridge.agent.domain.RiskLevel;
 import com.mindbridge.agent.domain.UserAccount;
 import com.mindbridge.agent.repository.AgentRunTraceRepository;
 import com.mindbridge.agent.repository.ChatSessionRepository;
+import com.mindbridge.agent.repository.ChatMessageRepository;
 import com.mindbridge.agent.repository.PsychologicalReportRepository;
 import com.mindbridge.agent.repository.UserAccountRepository;
 import com.mindbridge.agent.service.ToolOrchestrationService;
 import com.mindbridge.agent.service.ai.AiClient;
+import com.mindbridge.agent.service.ai.AiMessage;
+import com.mindbridge.agent.service.knowledge.KnowledgeService;
+import com.mindbridge.agent.service.knowledge.SearchResult;
 import com.mindbridge.agent.service.memory.ShortTermMemoryService;
 import com.mindbridge.agent.service.memory.UserProfileMemoryService;
 import java.util.List;
@@ -32,6 +37,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.EntityExchangeResult;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Flux;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "spring.datasource.url=jdbc:h2:mem:mindbridge-api-sse-harness;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
@@ -58,6 +64,12 @@ class ApiSseHarnessTests {
 
     @Autowired
     private UserAccountRepository userRepository;
+
+    @Autowired
+    private ChatMessageRepository messageRepository;
+
+    @MockBean
+    private KnowledgeService knowledgeService;
 
     @MockBean
     private AiClient aiClient;
@@ -148,6 +160,38 @@ class ApiSseHarnessTests {
                         """)
                 .exchange()
                 .expectStatus().isForbidden();
+    }
+
+    @Test
+    void consultStreamsAuthoritativeSourcesAndPersistsThemWithAnswer() {
+        when(knowledgeService.retrieve(anyString(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(
+                new SearchResult(42L, "campus-guide.md", "可联系学校心理中心。", 0.9)));
+        when(aiClient.stream(anyList())).thenReturn(Flux.just("引用验证回复：可联系学校心理中心 [1]。"));
+
+        String body = postChat("student", "student123", "最近焦虑，想知道如何求助。");
+
+        assertThat(body).contains("检索参考来源", "[1] campus-guide.md", "片段 #42");
+        assertThat(messageRepository.findAll().stream()
+                .filter(message -> message.getRole() == MessageRole.ASSISTANT)
+                .filter(message -> message.getContent().startsWith("引用验证回复")))
+                .singleElement().satisfies(message -> assertThat(message.getContent())
+                        .contains("[1] campus-guide.md", "片段 #42"));
+        ArgumentCaptor<List<AiMessage>> prompts = ArgumentCaptor.forClass(List.class);
+        verify(aiClient).stream(prompts.capture());
+        assertThat(prompts.getValue()).anySatisfy(message -> assertThat(message.content())
+                .contains("\"citation\":\"[1]\"", "\"chunkId\":42"));
+    }
+
+    @Test
+    void failedStreamDoesNotAppendSourcesToPartialAnswer() {
+        when(knowledgeService.retrieve(anyString(), org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(
+                new SearchResult(43L, "unused-guide.md", "学校心理中心", 0.9)));
+        when(aiClient.stream(anyList())).thenReturn(Flux.concat(
+                Flux.just("未完成的回复"), Flux.error(new IllegalStateException("unavailable"))));
+
+        String body = postChat("student", "student123", "最近焦虑，想知道如何求助。");
+
+        assertThat(body).contains("event:error", "event:done").doesNotContain("检索参考来源", "unused-guide.md");
     }
 
     @Test

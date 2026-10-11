@@ -18,6 +18,7 @@ import com.mindbridge.agent.service.ai.AiClient;
 import com.mindbridge.agent.service.ai.AiMessage;
 import com.mindbridge.agent.service.ai.PromptTemplates;
 import com.mindbridge.agent.service.knowledge.SearchResult;
+import com.mindbridge.agent.service.knowledge.KnowledgeEvidence;
 import com.mindbridge.agent.service.agent.AgentRunResult;
 import com.mindbridge.agent.service.agent.AgentRuntimeService;
 import com.mindbridge.agent.service.memory.ShortTermMemoryService;
@@ -132,7 +133,9 @@ public class ChatService {
                 ? buildMessages(user, agentRun.intent(), riskLevel, agentRun.retrievedKnowledge(), agentRun.modelHistory())
                 : agentRun.responseMessages();
         Long reportId = report == null ? null : report.getId();
-        return new PreparedConversation(user, session, agentRun.intent(), riskLevel, messages, reportId);
+        String sourceFooter = agentRun.intent() == IntentType.CHAT ? ""
+                : KnowledgeEvidence.sourceFooter(agentRun.retrievedKnowledge());
+        return new PreparedConversation(user, session, agentRun.intent(), riskLevel, messages, reportId, sourceFooter);
     }
 
     private Flux<ServerSentEvent<ChatStreamEvent>> streamPrepared(PreparedConversation prepared) {
@@ -142,9 +145,12 @@ public class ChatService {
                 ChatStreamEvent.meta(prepared.session().getPublicId())));
 
         Flux<ServerSentEvent<ChatStreamEvent>> tokens = aiClient.stream(prepared.messages())
-                .doOnNext(assistantReply::append)
-                .map(token -> event("token", ChatStreamEvent.token(prepared.session().getPublicId(), token)))
                 .timeout(Duration.ofSeconds(45))
+                .doOnNext(assistantReply::append)
+                .concatWith(Flux.defer(() -> assistantReply.isEmpty() || prepared.sourceFooter().isBlank()
+                        ? Flux.empty()
+                        : Flux.just(prepared.sourceFooter()).doOnNext(assistantReply::append)))
+                .map(token -> event("token", ChatStreamEvent.token(prepared.session().getPublicId(), token)))
                 .onErrorResume(exception -> Flux.just(event(
                         "error",
                         ChatStreamEvent.error(prepared.session().getPublicId(), "模型响应超时或失败，请稍后重试。"))))
@@ -227,10 +233,7 @@ public class ChatService {
             List<SearchResult> retrieved,
             List<AiMessage> history
     ) {
-        // 检索片段只作为系统上下文给模型使用，不直接展示后台评估信息给学生。
-        String context = String.join("\n\n", retrieved.stream()
-                .map(result -> "- [" + result.source() + "] " + result.content())
-                .toList());
+        String context = KnowledgeEvidence.format(retrieved);
         List<AiMessage> messages = new ArrayList<>();
         messages.add(PromptTemplates.answerSystemPrompt(intent, riskLevel, context, user.getDisplayName()));
 
@@ -256,7 +259,8 @@ public class ChatService {
             IntentType intent,
             RiskLevel riskLevel,
             List<AiMessage> messages,
-            Long reportId
+            Long reportId,
+            String sourceFooter
     ) {
     }
 }
