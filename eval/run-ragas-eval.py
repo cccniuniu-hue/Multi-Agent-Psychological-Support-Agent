@@ -31,7 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=180, help="Per-job RAGAS timeout in seconds.")
     parser.add_argument("--max-workers", type=int, default=16, help="RAGAS worker concurrency.")
     parser.add_argument("--no-progress", action="store_true", help="Disable RAGAS progress output.")
+    parser.add_argument("--validate-only", action="store_true", help="Validate input without importing RAGAS or calling models; write no scores.")
     return parser.parse_args()
+
+
+def reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-finite JSON number: {value}")
 
 
 def load_report(path: Path) -> dict[str, Any]:
@@ -40,16 +45,27 @@ def load_report(path: Path) -> dict[str, Any]:
             f"RAG eval report not found: {path}. "
             "Run the Java RAG eval first to create target/rag-eval-report.json."
         )
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            report = json.load(handle, parse_constant=reject_json_constant)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise SystemExit(f"Cannot read RAG eval report {path}: {exc}") from exc
+    if not isinstance(report, dict):
+        raise SystemExit("RAG eval report must be a JSON object containing cases.")
+    return report
 
 
 def report_cases(report: dict[str, Any]) -> list[dict[str, Any]]:
-    cases = report.get("cases")
-    if isinstance(cases, list):
-        return cases
-    legacy_cases = report.get("endToEnd", {}).get("cases", [])
-    return legacy_cases if isinstance(legacy_cases, list) else []
+    if "cases" in report:
+        cases = report["cases"]
+    else:
+        legacy = report.get("endToEnd", {})
+        if not isinstance(legacy, dict):
+            raise SystemExit("Report endToEnd must be an object containing cases.")
+        cases = legacy.get("cases", [])
+    if not isinstance(cases, list):
+        raise SystemExit("Report cases must be a JSON array.")
+    return cases
 
 
 def build_samples(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -60,10 +76,18 @@ def build_samples(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[di
     samples: list[dict[str, Any]] = []
     metadata: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
     for case in cases:
+        if not isinstance(case, dict):
+            raise SystemExit("Each report case must be a JSON object.")
         case_id = case.get("id", "")
-        question = case.get("question") or ""
-        answer = case.get("answer") or ""
+        if not isinstance(case_id, str) or not case_id.strip():
+            raise SystemExit("Each report case must have a non-empty string id.")
+        if case_id in seen_ids:
+            raise SystemExit(f"Report contains duplicate case id: {case_id}")
+        seen_ids.add(case_id)
+        question = case.get("question", "")
+        answer = case.get("answer", "")
         reference = case.get("referenceAnswer")
         contexts = case.get("retrievedContexts")
 
@@ -73,15 +97,20 @@ def build_samples(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[di
                 "Regenerate target/rag-eval-report.json."
             )
 
-        contexts = [context for context in contexts if isinstance(context, str) and context.strip()]
-        if not question.strip() or not answer.strip() or not str(reference).strip() or not contexts:
+        for field, value in [("question", question), ("answer", answer), ("referenceAnswer", reference)]:
+            if not isinstance(value, str):
+                raise SystemExit(f"Case {case_id}: {field} must be a string.")
+        if not isinstance(contexts, list) or any(not isinstance(context, str) for context in contexts):
+            raise SystemExit(f"Case {case_id}: retrievedContexts must be a list of strings.")
+        contexts = [context for context in contexts if context.strip()]
+        if not question.strip() or not answer.strip() or not reference.strip() or not contexts:
             skipped.append(
                 {
                     "id": case_id,
                     "reason": "missing question, answer, reference, or retrieved contexts",
                     "hasQuestion": bool(question.strip()),
                     "hasAnswer": bool(answer.strip()),
-                    "hasReference": bool(str(reference).strip()) if reference is not None else False,
+                    "hasReference": bool(reference.strip()),
                     "retrievedContextCount": len(contexts),
                 }
             )
@@ -92,7 +121,7 @@ def build_samples(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[di
                 "user_input": question,
                 "response": answer,
                 "retrieved_contexts": contexts,
-                "reference": str(reference),
+                "reference": reference,
             }
         )
         metadata.append(
@@ -106,7 +135,7 @@ def build_samples(report: dict[str, Any]) -> tuple[list[dict[str, Any]], list[di
             }
         )
     if not samples:
-        raise SystemExit("No cases have all RAGAS-required fields. Check skipped cases in the Java report.")
+        raise SystemExit(f"No cases have all RAGAS-required fields; skipped={len(skipped)}. Check question, answer, reference and contexts.")
     return samples, metadata, skipped
 
 
@@ -256,6 +285,15 @@ def main() -> None:
 
     report = load_report(input_path)
     samples, metadata, skipped = build_samples(report)
+    if args.validate_only:
+        print(json.dumps({
+            "status": "validated",
+            "inputCaseCount": len(samples) + len(skipped),
+            "eligibleCaseCount": len(samples),
+            "skippedCaseCount": len(skipped),
+            "skippedCases": skipped,
+        }, ensure_ascii=False, indent=2))
+        return
     dataset = build_ragas_dataset(samples)
     metrics = build_metrics(args.metrics)
     llm, embeddings = build_models(args)

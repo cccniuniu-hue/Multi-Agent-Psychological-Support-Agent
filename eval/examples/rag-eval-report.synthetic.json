@@ -1,0 +1,44 @@
+{
+  "dataset": "synthetic-demo-not-a-benchmark",
+  "fusionStrategy": "RRF",
+  "topK": 2,
+  "totalCases": 3,
+  "cases": [
+    {
+      "id": "demo-grounded-advice",
+      "question": "示例资料建议如何拆分复习任务？",
+      "answer": "把复习任务分成小块，每完成一块后安排短时休息。",
+      "referenceAnswer": "拆分任务并安排短时休息。",
+      "retrievedContexts": ["合成示例资料：复习任务可分成小块，并安排短时休息。"],
+      "retrievedSources": ["synthetic-study-guide.md"],
+      "expectedIntent": "CONSULT",
+      "actualIntent": "CONSULT",
+      "expectedRiskLevel": "LOW",
+      "actualRiskLevel": "LOW"
+    },
+    {
+      "id": "demo-grounded-process",
+      "question": "在虚构的示例学校，如何确认心理中心的预约方式？",
+      "answer": "查看示例学校的官方公告或向心理中心核实预约入口，时间以公告为准。",
+      "referenceAnswer": "通过学校官方公告或心理中心确认预约入口与时间。",
+      "retrievedContexts": ["合成示例资料：预约入口和时间以学校官方公告或心理中心的确认为准。"],
+      "retrievedSources": ["synthetic-campus-guide.md"],
+      "expectedIntent": "CONSULT",
+      "actualIntent": "CONSULT",
+      "expectedRiskLevel": "LOW",
+      "actualRiskLevel": "LOW"
+    },
+    {
+      "id": "demo-no-retrieved-context",
+      "question": "虚构的示例心理中心周日开放吗？",
+      "answer": "现有检索资料不足，无法确认周日是否开放，请向示例学校核实。",
+      "referenceAnswer": "资料不足时明确说明，并建议向学校核实具体时间。",
+      "retrievedContexts": [],
+      "retrievedSources": [],
+      "expectedIntent": "CONSULT",
+      "actualIntent": "CONSULT",
+      "expectedRiskLevel": "LOW",
+      "actualRiskLevel": "LOW"
+    }
+  ]
+}
