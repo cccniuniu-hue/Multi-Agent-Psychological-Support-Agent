@@ -41,3 +41,7 @@ jobs:
               py_compile.compile(path, doraise=True)
           print(f"Checked {len(paths)} Python files")
           PY
+      - name: Check RAGAS tooling without models or optional dependencies
+        run: |
+          python -m unittest discover -s eval -p 'test_ragas_eval.py' -v
+          python eval/run-ragas-eval.py --input eval/examples/rag-eval-report.synthetic.json --validate-only

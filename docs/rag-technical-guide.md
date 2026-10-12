@@ -893,6 +893,15 @@ target/rag-eval-report.json
 
 ### 18.3 Python 端运行 RAGAS
 
+先检查合成输入和报告处理逻辑，无需安装 RAGAS 或启动服务：
+
+```bash
+python eval/run-ragas-eval.py --input eval/examples/rag-eval-report.synthetic.json --validate-only
+python -m unittest discover -s eval -p 'test_ragas_eval.py' -v
+```
+
+合成样例中 2 条记录可评估，1 条因上下文为空而跳过。`--validate-only` 只打印数量和原因，不调用模型、不写评分文件；更换输入路径即可检查 Java 导出的报告。样本 ID 必须唯一且非空，文本字段必须是字符串，上下文必须是字符串列表；全部记录均不满足评分条件时会报错。
+
 安装依赖：
 
 ```bash
@@ -926,13 +935,20 @@ python3 eval/run-ragas-eval.py \
 - `LLMContextRecall`：检索上下文是否覆盖参考答案所需信息。
 - `ResponseRelevancy`：回答是否切题。
 - `Faithfulness`：回答中的事实是否能被检索上下文支持。
-- `FactualCorrectness`：若当前 RAGAS 版本支持，则和参考答案比对事实正确性。
+
+可通过 `--metrics` 显式追加 `FactualCorrectness`；指定的指标不可用时会报错，不会静默省略。评审模型及 Embedding 与主应用 DeepSeek 聊天独立配置，用户画像向量化仍默认关闭。
 
 输出：
 
 ```text
 target/ragas-report.json
 ```
+
+报告中的 `scores` 只对有效数值求均值，失败分数为 `null`；`metricCoverage` 记录每项指标的有效/失败数量，`skippedCases` 记录输入跳过原因。`status` 为 `complete`、`partial` 或 `failed`，表示评估完成程度，不代表质量达标；全部评分失败时仍写出报告并以非零状态退出。返回记录数量或指标列不匹配时直接报错，防止样本错位。
+
+`evaluation` 保存实际评审及 Embedding 模型、RAGAS 版本、UTC 时间和并发/超时/批次参数，报告还保留 Java 输入中的 `fusionStrategy`、`topK`、数据集和生成时间。比较融合策略时固定数据和这些配置，同时核对覆盖数量；跳过的空检索不参与均值，不能仅凭均值声称整体检索质量提高。输入输出路径必须不同，超时、并发及显式批次大小必须为正整数。
+
+实际评分需要选定的评审与向量服务。仓库样例及 CI 检查不包含实测质量分数；详细指标含义、Windows 命令及隐私说明见 [评估说明](../eval/README.md)。
 
 ## 19. 可观测性与排障
 

@@ -465,7 +465,16 @@ JAVA_HOME="$PWD/.tools/amazon-corretto-17.jdk/Contents/Home" \
 - `LLMContextRecall`：检索内容是否覆盖参考答案需要的信息
 - `ResponseRelevancy`：回答是否切题
 - `Faithfulness`：回答中的事实是否能被检索上下文支持
-- `FactualCorrectness`：若当前 RAGAS 版本支持，则对比参考答案检查事实正确性
+
+默认执行上述四项指标；`FactualCorrectness` 可通过 `--metrics` 显式追加，指定的指标不可用时会报错，不会静默省略。
+
+无需服务或 RAGAS 依赖即可检查合成样例：
+
+```bash
+python eval/run-ragas-eval.py --input eval/examples/rag-eval-report.synthetic.json --validate-only
+```
+
+样例包含 2 条可评估记录和 1 条明确跳过的空上下文记录；该命令只检查输入，不调用模型、不输出质量分数。替换 `--input` 即可检查 Java 导出的实际报告。
 
 安装 RAGAS 依赖：
 
@@ -486,3 +495,5 @@ python3 eval/run-ragas-eval.py \
 `eval/` 中的评审模型与主应用聊天模型独立配置；详见 `eval/README.md`。
 
 RAGAS 输出报告：`target/ragas-report.json`
+
+报告记录四项指标均值、逐项有效与失败数量、跳过原因，以及融合策略、评审/Embedding 模型、RAGAS 版本和执行参数。失败值保留为 `null`，均值只统计有效分数；全部评分失败时写出报告并以非零状态退出。`complete` / `partial` / `failed` 表示评估完成程度，不能视为质量达标；比较均值时需同时检查覆盖数量。指标含义、Windows 命令及输入约束见 [评估说明](eval/README.md)。

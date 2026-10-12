@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+from importlib import metadata as package_metadata
 import json
 import math
 import os
@@ -11,7 +13,21 @@ from pathlib import Path
 from typing import Any
 
 
-INPUT_COLUMNS = {"user_input", "response", "retrieved_contexts", "reference"}
+DEFAULT_METRICS = "Faithfulness,ResponseRelevancy,LLMContextPrecisionWithReference,LLMContextRecall"
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
+def metric_names(value: str) -> list[str]:
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    if not names or len(names) != len(set(names)):
+        raise argparse.ArgumentTypeError("--metrics must contain distinct, non-empty metric class names")
+    return names
 
 
 def parse_args() -> argparse.Namespace:
@@ -22,14 +38,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--judge-model", default=None, help="LLM-as-judge model name.")
     parser.add_argument("--embedding-model", default=None, help="Embedding model name.")
     parser.add_argument("--ollama-base-url", default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
-    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--batch-size", type=positive_int, default=None)
     parser.add_argument(
         "--metrics",
-        default="LLMContextPrecisionWithReference,LLMContextRecall,ResponseRelevancy,Faithfulness,FactualCorrectness",
+        type=metric_names,
+        default=DEFAULT_METRICS,
         help="Comma-separated RAGAS metric class names to run.",
     )
-    parser.add_argument("--timeout", type=int, default=180, help="Per-job RAGAS timeout in seconds.")
-    parser.add_argument("--max-workers", type=int, default=16, help="RAGAS worker concurrency.")
+    parser.add_argument("--timeout", type=positive_int, default=180, help="Per-job RAGAS timeout in seconds.")
+    parser.add_argument("--max-workers", type=positive_int, default=16, help="RAGAS worker concurrency.")
     parser.add_argument("--no-progress", action="store_true", help="Disable RAGAS progress output.")
     parser.add_argument("--validate-only", action="store_true", help="Validate input without importing RAGAS or calling models; write no scores.")
     return parser.parse_args()
@@ -165,20 +182,21 @@ def find_metric_class(name: str) -> Any:
     return metric_class
 
 
-def build_metrics(metric_names: str) -> list[Any]:
-    names = [name.strip() for name in metric_names.split(",") if name.strip()]
-    metrics = []
-    for name in names:
-        try:
-            metrics.append(find_metric_class(name)())
-        except SystemExit:
-            if name == "FactualCorrectness":
-                continue
-            raise
-    return metrics
+def build_metrics(names: list[str]) -> list[Any]:
+    return [find_metric_class(name)() for name in names]
+
+
+def evaluator_model_names(args: argparse.Namespace) -> tuple[str, str]:
+    if args.provider == "openai":
+        return args.judge_model or "gpt-4o-mini", args.embedding_model or "text-embedding-3-small"
+    judge_model = args.judge_model or os.getenv("OLLAMA_MODEL")
+    if not judge_model:
+        raise SystemExit("Set --judge-model or OLLAMA_MODEL for the optional Ollama evaluator.")
+    return judge_model, args.embedding_model or "nomic-embed-text"
 
 
 def build_models(args: argparse.Namespace) -> tuple[Any, Any]:
+    judge_model, embedding_model = evaluator_model_names(args)
     try:
         from ragas.embeddings import LangchainEmbeddingsWrapper
         from ragas.llms import LangchainLLMWrapper
@@ -192,17 +210,11 @@ def build_models(args: argparse.Namespace) -> tuple[Any, Any]:
             raise SystemExit("OPENAI_API_KEY is required when --provider openai is used.")
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-        judge_model = args.judge_model or "gpt-4o-mini"
-        embedding_model = args.embedding_model or "text-embedding-3-small"
         llm = ChatOpenAI(model=judge_model, temperature=0)
         embeddings = OpenAIEmbeddings(model=embedding_model)
     else:
         from langchain_ollama import ChatOllama, OllamaEmbeddings
 
-        judge_model = args.judge_model or os.getenv("OLLAMA_MODEL")
-        if not judge_model:
-            raise SystemExit("Set --judge-model or OLLAMA_MODEL for the optional Ollama evaluator.")
-        embedding_model = args.embedding_model or "nomic-embed-text"
         llm = ChatOllama(model=judge_model, base_url=args.ollama_base_url, temperature=0)
         embeddings = OllamaEmbeddings(model=embedding_model, base_url=args.ollama_base_url)
 
@@ -221,23 +233,26 @@ def run_ragas(args: argparse.Namespace, dataset: Any, metrics: list[Any], llm: A
         run_config=RunConfig(timeout=args.timeout, max_workers=args.max_workers),
         batch_size=args.batch_size,
         show_progress=not args.no_progress,
+        raise_exceptions=False,
     )
 
 
-def summarize_frame(frame: Any) -> dict[str, float]:
-    scores: dict[str, float] = {}
-    for column in frame.columns:
-        if column in INPUT_COLUMNS:
-            continue
-        numeric = frame[column]
-        try:
-            numeric = numeric.astype(float)
-        except (TypeError, ValueError):
-            continue
-        values = [float(value) for value in numeric.tolist() if value == value]
-        if values:
-            scores[column] = sum(values) / len(values)
-    return scores
+def finite_score(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def summarize_scores(cases: list[dict[str, Any]], columns: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    scores = {}
+    coverage = {}
+    for column in columns:
+        values = [case[column] for case in cases if case[column] is not None]
+        scores[column] = sum(values) / len(values) if values else None
+        coverage[column] = {"validCount": len(values), "failedCount": len(cases) - len(values)}
+    return scores, coverage
 
 
 def clean_json(value: Any) -> Any:
@@ -258,24 +273,32 @@ def write_output(
     output_path: Path,
     input_path: Path,
     report: dict[str, Any],
-    scores: dict[str, float],
+    scores: dict[str, Any],
     cases: list[dict[str, Any]],
     skipped: list[dict[str, Any]],
+    evaluation: dict[str, Any],
+    coverage: dict[str, Any],
+    status: str,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "input": str(input_path),
         "sourceEvaluatedAt": report.get("evaluatedAt"),
         "dataset": report.get("dataset"),
+        "fusionStrategy": report.get("fusionStrategy"),
         "topK": report.get("topK"),
+        "status": status,
+        "evaluation": evaluation,
+        "inputCaseCount": len(cases) + len(skipped),
         "caseCount": len(cases),
         "skippedCaseCount": len(skipped),
         "scores": scores,
+        "metricCoverage": coverage,
         "cases": cases,
         "skippedCases": skipped,
     }
-    with output_path.open("w", encoding="utf-8") as handle:
-        json.dump(clean_json(payload), handle, ensure_ascii=False, indent=2)
+    text = json.dumps(clean_json(payload), ensure_ascii=False, indent=2, allow_nan=False)
+    output_path.write_text(text, encoding="utf-8")
 
 
 def main() -> None:
@@ -294,24 +317,50 @@ def main() -> None:
             "skippedCases": skipped,
         }, ensure_ascii=False, indent=2))
         return
+    if input_path.resolve() == output_path.resolve():
+        raise SystemExit("Input and output paths must be different; do not overwrite the Java report.")
     dataset = build_ragas_dataset(samples)
     metrics = build_metrics(args.metrics)
     llm, embeddings = build_models(args)
     result = run_ragas(args, dataset, metrics, llm, embeddings)
 
-    frame = result.to_pandas()
-    cases = frame.to_dict(orient="records")
-    for case, extra in zip(cases, metadata):
-        case.update(extra)
+    rows = result.scores
+    if not isinstance(rows, list) or len(rows) != len(samples) or any(not isinstance(row, dict) for row in rows):
+        raise SystemExit("RAGAS result count or shape does not match the input; cannot align case IDs.")
+    returned_columns = {column for row in rows for column in row}
+    columns = []
+    for metric in metrics:
+        matches = [column for column in returned_columns
+                   if column == metric.name or column.startswith(metric.name + "(mode=")]
+        if len(matches) != 1:
+            raise SystemExit(f"RAGAS result is missing or has ambiguous scores for metric: {metric.name}")
+        columns.append(matches[0])
+    cases = [{**sample, **extra, **{column: finite_score(row.get(column)) for column in columns}}
+             for sample, extra, row in zip(samples, metadata, rows)]
+    scores, coverage = summarize_scores(cases, columns)
+    status = "failed" if all(value is None for value in scores.values()) else (
+        "partial" if skipped or any(item["failedCount"] for item in coverage.values()) else "complete")
+    judge_model, embedding_model = evaluator_model_names(args)
+    evaluation = {
+        "evaluatedAt": datetime.now(timezone.utc).isoformat(),
+        "provider": args.provider,
+        "judgeModel": judge_model,
+        "embeddingModel": embedding_model,
+        "metrics": args.metrics,
+        "ragasVersion": package_metadata.version("ragas"),
+        "timeoutSeconds": args.timeout,
+        "maxWorkers": args.max_workers,
+        "batchSize": args.batch_size,
+    }
+    write_output(output_path, input_path, report, scores, cases, skipped, evaluation, coverage, status)
 
-    scores = summarize_frame(frame)
-    write_output(output_path, input_path, report, scores, cases, skipped)
-
-    print(f"RAGAS evaluation completed: {output_path}")
+    print(f"RAGAS evaluation {status}: {output_path}")
     if skipped:
         print(f"skipped_cases={len(skipped)}")
     for name, value in sorted(scores.items()):
-        print(f"{name}={value:.4f}")
+        print(f"{name}={value:.4f}" if value is not None else f"{name}=null (no valid scores)")
+    if status == "failed":
+        raise SystemExit("No finite metric scores were produced; failure details are recorded in the report.")
 
 
 if __name__ == "__main__":
