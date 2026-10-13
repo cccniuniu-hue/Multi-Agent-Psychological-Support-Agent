@@ -1,4 +1,6 @@
-# 
+# Multi-Agent-Psychological-Support-Agent RAG 技术说明
+
+本文按 2026-10-13 的代码与默认配置校对。主应用聊天使用 DeepSeek API；Marker、Qwen2-VL、BGE 和画像向量化均按各自配置启用。编译与语法验收不等于这些服务已部署或质量指标已实测。
 
 ## 1. RAG 在项目中的定位
 
@@ -24,10 +26,11 @@ MindBridge 的 RAG 采用“数据库主存储 + 可选 Chroma 向量索引 + BM
 ```mermaid
 flowchart LR
     A["内置知识文件<br/>src/main/resources/knowledge/*.md"] --> B["KnowledgeIngestionService"]
-    C["管理员上传<br/>PDF / Markdown / txt / JSON文本"] --> D["KnowledgeFileService / KnowledgeController"]
+    C["管理员上传<br/>PDF / DOCX / Markdown / txt / JSON文本"] --> D["KnowledgeFileService / KnowledgeController"]
+    D --> Parse["Marker 可选 / PDFBox / UTF-8<br/>Markdown AST + 可选图片描述"]
     B --> E["KnowledgeService.ingest"]
-    D --> E
-    E --> F["KnowledgeChunker<br/>切块 + overlap"]
+    Parse --> E
+    E --> F["KnowledgeChunker<br/>结构化切块 / 文本 overlap / IMAGE块"]
     F --> G["knowledge_chunks<br/>H2 / MySQL 主存储"]
     F --> H["OpenAI兼容 Embedding<br/>embeddingJson 可选"]
     G --> I["ChromaGateway.mirror<br/>可选向量索引"]
@@ -42,15 +45,16 @@ flowchart LR
     P --> Q["RiskGuardianAgent"]
     Q --> R["CounselorAgent<br/>RAG上下文 + 风险策略"]
     R --> S["AiClient.stream<br/>SSE流式回复"]
+    O --> S
 ```
 
 ### 2.1 关键设计点
 
 - 路由优先：`SupervisorAgent` 先判断 `CHAT / CONSULT / RISK`。只有 `CONSULT` 和 `RISK` 触发 `KnowledgeAgent`。
 - 数据库是主存储：知识切块统一保存到 `knowledge_chunks` 表。Chroma 只是可选索引层，不是唯一数据源。
-- 检索是混合式：优先查 Chroma 或本地向量，再同时跑 BM25，最后按加权分数融合。
+- 检索是混合式：Chroma 或本地向量与 BM25 分别粗召回，默认 RRF 融合；可选原有加权策略，再用 BGE HTTP 服务重排到 Top5。
 - 失败可降级：Chroma 不可用、embedding API 未配置或调用失败时，系统仍可通过 BM25 检索工作。
-- 回答受约束：检索结果只作为 system prompt 上下文输入给模型，用户不会看到后台分数、风险标签或报告信息。
+- 回答受约束：检索结果作为低可信 user 数据消息提供，系统指令单独规定安全与引用规则；用户不会看到后台分数、风险标签或报告信息。
 
 ### 2.2 RAG 相关技术栈
 
@@ -64,23 +68,28 @@ flowchart LR
 | 向量索引 | Chroma | 可选保存知识库和用户画像的语义索引 |
 | 向量化 | OpenAI 兼容 `/v1/embeddings` | 生成一份向量，同时用于 Chroma 与本地向量相似度兜底 |
 | 关键词检索 | 自研 BM25 | 无 embedding 或 Chroma 不可用时仍可检索知识 |
-| 文件解析 | Apache PDFBox | 从管理员上传的 PDF 中抽取文本 |
+| 文件解析 | Marker HTTP、Apache PDFBox、commonmark-java | PDF/DOCX 转 Markdown，可选本地 PDF 降级；AST 提取章节、段落、表格和代码 |
+| 图片描述 | Qwen2-VL HTTP | 将文档图片描述回填原位置，并生成保留原图路径的独立检索块 |
+| 二阶段重排 | BGE Reranker HTTP | `BAAI/bge-reranker-v2-m3` 批量评分；异常时退回初排 |
 | 质量评测 | RAGAS、LangChain OpenAI/Ollama wrappers | 离线评测上下文精确率、召回、忠实度和回答相关性 |
 
 ## 3. 代码地图
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| 知识切块实体 | `domain/KnowledgeChunk.java` | 保存 source、sourceIndex、content、embeddingJson、模型、维度和 createdAt |
+| 知识切块实体 | `domain/KnowledgeChunk.java` | 保存 source、sourceIndex、content、章节、块类型、图片路径、向量版本和 createdAt |
 | 知识库仓储 | `repository/KnowledgeChunkRepository.java` | 按 source 删除、计数、按 sourceIndex 取邻居切块 |
 | 入库核心 | `service/knowledge/KnowledgeService.java` | 切块、embedding、落库、Chroma 镜像、混合检索、上下文扩展 |
-| 切块器 | `service/knowledge/KnowledgeChunker.java` | 按自然边界和 overlap 切分文本 |
+| 切块器 | `service/knowledge/KnowledgeChunker.java` | 结构化章节/段落与估算 token 切分；纯文本自然边界和 overlap |
 | BM25 检索 | `service/knowledge/Bm25Scorer.java` | 本地关键词检索和中文 bigram tokenizer |
 | Chroma 网关 | `service/knowledge/ChromaGateway.java` | 创建 collection、写入、查询、按 source 删除 |
 | Embedding 接口 | `service/knowledge/EmbeddingClient.java` | 抽象文本向量化能力 |
 | OpenAI embedding | `service/knowledge/OpenAiEmbeddingClient.java` | 调用 OpenAI 兼容 `/v1/embeddings` 接口 |
 | 内置知识同步 | `service/knowledge/KnowledgeIngestionService.java` | 启动时加载 `classpath*:knowledge/*.*` |
-| 文件解析 | `service/knowledge/KnowledgeFileService.java` | 支持 PDF、Markdown、txt，限制 10MB |
+| 文件解析 | `service/knowledge/KnowledgeFileService.java` | 支持 PDF、Markdown、txt 和需 Marker 的 DOCX，限制 10MB |
+| 解析与图片 | `DocumentParseResult`、`MarkdownDocumentParser`、`MarkerDocumentClient`、`ImageDescriptionClient` | 统一解析状态、Markdown AST、图片路径及描述关联 |
+| 重排客户端 | `service/knowledge/BgeRerankerClient.java` | 校验批量评分数量、索引、数值及超时 |
+| 索引重建 | `service/index/IndexRebuildRunner.java` | 从关系库重放知识和画像 Chroma 索引 |
 | 管理接口 | `controller/KnowledgeController.java` | `POST /api/admin/knowledge` 和 `/file` |
 | RAG Agent | `service/agent/KnowledgeAgent.java` | query 改写、检索、充分性判断、二次检索 |
 | 回复 Agent | `service/agent/CounselorAgent.java` | 将 RAG 命中、风险评估和记忆摘要组合进回复 prompt |
@@ -128,11 +137,14 @@ curl -u admin:admin123 \
 
 `KnowledgeFileService` 支持：
 
-- PDF：通过 Apache PDFBox 的 `PDFTextStripper` 提取文本。
+- PDF：Marker 开启时优先转换为 Markdown；关闭或失败时通过 PDFBox 按页提取文本。
+- DOCX：需要 Marker 成功返回 Markdown，无本地 DOCX 降级。
 - Markdown：按 UTF-8 文本读取。
 - txt：按 UTF-8 文本读取。
 
 上传文件大小限制为 10MB。`source` 会去掉路径分隔符，最多保留 180 个字符，避免把本地路径写进后台展示。
+
+`DocumentParseResult` 统一保存正文、来源、标题、页码/图片清单和 `SUCCESS / EMPTY / FAILED` 状态。Markdown 经 AST 提取标题路径、段落、GFM 表格、代码块和图片引用。Qwen2-VL 开启后只描述 Marker 返回的图片内容，按完整相对路径关联；失败跳过该图片，成功描述回填原位置并单独生成 `IMAGE` 块。Base64 仅在解析时使用，不进入知识块或解析结果 JSON；直接上传的 Markdown 外部图片不下载。
 
 ### 4.3 同源刷新逻辑
 
@@ -143,7 +155,7 @@ curl -u admin:admin123 \
 3. 删除 Chroma 中相同 `source` 的旧索引。
 4. 逐个保存新切块并重新镜像到 Chroma。
 
-这保证同名文件重新上传后，后台看到的是最新内容，而不是新旧知识混合。
+关系库会替换同源切块。Chroma 删除或镜像失败不阻止该数据库更新，两个存储之间没有分布式事务；外部索引可能仍有旧记录或缺失记录，需按第 8.5 节核对和恢复。
 
 内置知识同步时不会无条件覆盖。`KnowledgeIngestionService.shouldIngestBundledSource()` 会比较已有 chunk 数量和当前文件切块数量：
 
@@ -157,10 +169,18 @@ curl -u admin:admin123 \
 
 | 配置项 | 默认值 | 说明 |
 | --- | ---: | --- |
-| `KNOWLEDGE_CHUNK_SIZE` | 512 | 单个 chunk 目标长度 |
-| `KNOWLEDGE_CHUNK_OVERLAP` | 64 | 相邻 chunk 的重叠长度 |
+| `KNOWLEDGE_CHUNK_SIZE` | 512 | 结构化路径的估算 token 预算，或纯文本路径的字符目标长度 |
+| `KNOWLEDGE_CHUNK_OVERLAP` | 64 | 仅纯文本路径的相邻字符重叠长度 |
 
-实际逻辑：
+### 5.1 结构化文档路径
+
+管理员上传的 Markdown 和 Marker 转换结果使用 AST 切块：同一章节的相邻段落在预算内合并，章节变化或超过预算时分块；超长段落按估算 token 预算继续拆分。表格和代码保持独立块，超长表格按行拆分并重复表头，代码块按行拆分并保留围栏。每块保存 `sectionPath` 和 `contentType`；独立图片描述块额外保存 `imagePath`。
+
+这里采用字符成本估算 token，不是模型专属 tokenizer。单行表格、表头、代码行或图片路径本身超过预算时，优先保持结构/来源，不能保证每个块严格低于模型 token 上限；入库前仍需结合实际 Embedding 限制检查。结构化路径不应用 `KNOWLEDGE_CHUNK_OVERLAP`。
+
+### 5.2 纯文本路径
+
+内置知识同步、JSON 文本和 PDFBox/txt 解析结果保留原有字符切块逻辑：
 
 1. 将 Windows 换行 `\r\n` 统一为 `\n`。
 2. 去掉首尾空白。
@@ -190,6 +210,7 @@ curl -u admin:admin123 \
 | `source` | 来源文件或来源名 | 展示、删除、按来源刷新 |
 | `sourceIndex` | 同一 source 内的切块顺序 | 检索命中后取前后邻居 |
 | `content` | 切块文本 | BM25、prompt 注入、Chroma 文档 |
+| `sectionPath` | 标题层级路径 | 保存结构化块所属章节 |
 | `contentType` | 段落、表格、代码或图片 | 区分图片描述的独立检索块 |
 | `imagePath` | 原图片相对路径 | 保留图片块的原图来源，也同步到 Chroma 元数据 |
 | `embeddingJson` | 向量 JSON | 本地向量相似度兜底 |
@@ -301,7 +322,7 @@ chroma:
 - `ids`：chunk id。
 - `documents`：chunk 文本。
 - `embeddings`：Java embedding 客户端生成的向量。
-- `metadatas`：`source`、`sourceIndex`、`embeddingModel` 和 `embeddingDimensions`。
+- `metadatas`：`source`、`sourceIndex`、`sectionPath`、`contentType`、`imagePath`、`embeddingModel` 和 `embeddingDimensions`。
 
 网关通过 Chroma v2 API 创建或获取 collection，缓存响应中的 collection UUID，后续使用该 UUID 调用 `upsert`、`query` 和 `delete`。创建失败时不缓存失败结果，下次请求会重新尝试。
 
@@ -339,11 +360,22 @@ score = 1.0 - distance
 
 Chroma 的所有关键调用都做了失败降级：
 
-- `mirror()` 写入失败使用 `onErrorComplete()`，不影响数据库写入。
+- `mirror()` 写入失败返回 `false`，日常入库继续保存数据库；重建命令据此报告失败。
 - `query()` 捕获异常后返回空列表。
 - `deleteSource()` 删除失败使用 `onErrorComplete()`。
 
 因此，Chroma 宕机时，系统会自动回退到本地 embedding 或 BM25。
+
+### 8.5 索引恢复与模型迁移
+
+现有入口为 `--rebuild-index=knowledge|memory|all`，使用稳定 ID upsert，不删除关系库主数据。运行命令见 [README 的索引重建说明](../README.md#重建-chroma-索引)，实际执行前需配置对应数据库、Chroma 和启动环境。
+
+- 知识重建只重放数据库已有且自身维度匹配的向量；缺失或无效向量计入 `knowledgeSkipped`，不会调用知识库 Embedding 补生成。
+- 更换知识库模型或维度后，应重新入库生成新向量，再重建索引；仅运行重建不会将旧向量转换为新版本。
+- 画像重建要求显式启用画像 Embedding、专用密钥和 Chroma；`all` 会跳过关闭的画像路径，单独指定 `memory` 则报错。画像重建文档先脱敏再向量化。
+- 任一需要重放的写入失败会终止并报错；此前完成的 upsert 可以安全重试。该过程不提供跨库原子性，也不自动清理已无数据库记录的 Chroma 孤立条目。
+
+同源替换时若外部删除失败，恢复前需核对该来源的旧索引记录并清理残留；仅补写新记录不能保证旧记录消失。知识网关的部分请求没有独立的整体等待上限，Chroma 不可达时的实际延迟需部署后确认。
 
 ## 9. BM25 本地检索
 
@@ -403,7 +435,7 @@ score += idf * (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * length / avgLength))
 KnowledgeService.retrieve(String query, int topK)
 ```
 
-默认 `topK = 4`，由 `RAG_TOP_K` 控制。
+默认 `topK = 5`，由 `RAG_TOP_K` 控制。离线评测独立使用 `RAG_EVAL_TOP_K`，其默认仍为 4；比较生产配置时应显式对齐。
 
 ### 10.1 候选数量
 
@@ -413,7 +445,7 @@ KnowledgeService.retrieve(String query, int topK)
 candidateLimit = max(topK, RAG_COARSE_RECALL_LIMIT, RAG_RERANKER_CANDIDATE_LIMIT)
 ```
 
-默认情况下，即使最终只返回 4 条，也会从向量检索和 BM25 各取最多 50 条候选再融合；可通过 `RAG_COARSE_RECALL_LIMIT` 调整。粗召回上限不会低于请求的 `topK` 和 reranker 候选上限，避免提前截断需要的结果。
+默认情况下，即使最终只返回 5 条，也会从向量检索和 BM25 各取最多 50 条候选再融合；可通过 `RAG_COARSE_RECALL_LIMIT` 调整。粗召回上限不会低于请求的 `topK` 和 reranker 候选上限，避免提前截断需要的结果。
 
 ### 10.2 检索路线
 
@@ -444,7 +476,7 @@ flowchart TD
 
 ### 10.4 BM25 路线
 
-BM25 总会在本地数据库中的所有 chunk 上执行。只要知识库中有文本，BM25 就能提供候选。
+BM25 总会在本地数据库中的所有 chunk 上执行；只返回正分候选，没有匹配词时可能为空。
 
 ### 10.5 RRF 与可选加权融合
 
@@ -483,20 +515,22 @@ private static final double BM25_WEIGHT = 0.35;
 混合排序后，系统会把初排候选交给 `KnowledgeReranker` 做二阶段重排：
 
 ```text
-rerankCandidates = min(RAG_RERANKER_CANDIDATE_LIMIT, hybridCandidates)
-rerankScore = AiClient.complete(query + candidates)
-finalScore = rerankScore * 0.85 + normalizedInitialScore * 0.15
+rerankCandidates = 前 min(50, max(topK, RAG_RERANKER_CANDIDATE_LIMIT)) 条初排候选
+scores = BgeRerankerClient.score(query, clippedPassages)
+返回 BGE 分数降序的 topK；失败则保留初排 topK
 ```
 
 默认配置：
 
 ```text
 RAG_RERANKER_ENABLED=true
-RAG_RERANKER_CANDIDATE_LIMIT=20
+RAG_RERANKER_CANDIDATE_LIMIT=50
 RAG_RERANKER_MAX_CONTENT_CHARS=700
+RAG_RERANKER_BASE_URL=http://localhost:8003
+RAG_RERANKER_CLIENT_TIMEOUT_SECONDS=35
 ```
 
-reranker 会要求模型只输出 JSON 分数。如果模型不可用、输出不是 JSON 或解析失败，系统会自动退回混合排序结果，保证 RAG 链路不中断。
+`BAAI/bge-reranker-v2-m3` 部署在独立 Python HTTP 服务，不使用聊天 `AiClient` 打分。客户端核对评分数量、位置索引和有限数值；服务关闭、异常、超时或响应无效时退回初排。只剩一条候选时不请求服务。请求和错误契约见 [BGE 服务说明](../services/reranker/README.md)。
 
 ### 10.7 候选去重
 
@@ -523,7 +557,7 @@ reranker 会要求模型只输出 JSON 分数。如果模型不可用、输出�
 
 ## 12. Agent 编排中的 RAG
 
-RAG 不是在 `ChatService` 中直接调用，而是在 `AgentRuntimeService` 的有限步 Agent loop 中执行。最大步数为 8。
+RAG 不是在 `ChatService` 中直接调用，而是在 `AgentRuntimeService` 的有限步 Agent loop 中执行。最大步数为 5，CHAT 路径为 3 步，CONSULT/RISK 路径为 5 步。
 
 Agent 顺序：
 
@@ -534,7 +568,7 @@ Agent 顺序：
 5. `CompanionAgent`
 6. `CounselorAgent`
 
-每个 Agent 通过 `supports(context)` 判断是否接手。
+上述列表是注册顺序；调度器按已完成步数和已确定路由选择唯一下一步，再通过 `supports(context)` 校验状态，不扫描寻找可绕过前置环节的 Agent。只有对应回复 Agent 可以结束循环；缺失路由、状态非法、未完成风险评估或超过步数均报错。
 
 ### 12.1 MemoryAgent
 
@@ -757,14 +791,19 @@ Chroma 查询同时过滤当前账号的 `userId`、画像 embedding 模型和�
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `RAG_TOP_K` | `4` | 最终返回给回答 prompt 的检索结果数量 |
+| `RAG_TOP_K` | `5` | 最终返回给回答 prompt 的检索结果数量 |
 | `RAG_COARSE_RECALL_LIMIT` | `50` | 向量与 BM25 各自的粗召回候选上限 |
 | `RAG_FUSION_STRATEGY` | `rrf` | `rrf` 或 `weighted`；按评测结果选择 |
+| `RAG_RERANKER_ENABLED` | `true` | 是否调用独立 BGE 服务，异常退回初排 |
+| `RAG_RERANKER_CANDIDATE_LIMIT` | `50` | BGE 请求候选上限，服务最大 50 条 |
+| `RAG_RERANKER_MAX_CONTENT_CHARS` | `700` | 送入重排的每条文本截断长度，不修改数据库原文 |
+| `RAG_RERANKER_BASE_URL` | `http://localhost:8003` | BGE HTTP 地址，Compose 内为 `http://reranker:8003` |
+| `RAG_RERANKER_CLIENT_TIMEOUT_SECONDS` | `35` | Java 等待 BGE 的超时秒数 |
 | `USE_CHROMA` | `true` | 是否启用 Chroma 知识库索引 |
 | `CHROMA_BASE_URL` | `http://localhost:8000` | Chroma 服务地址 |
 | `CHROMA_COLLECTION` | `mindbridge_knowledge` | 知识库 collection |
-| `KNOWLEDGE_CHUNK_SIZE` | `512` | 知识切块大小 |
-| `KNOWLEDGE_CHUNK_OVERLAP` | `64` | 知识切块 overlap |
+| `KNOWLEDGE_CHUNK_SIZE` | `512` | 结构化估算 token 预算 / 纯文本字符长度 |
+| `KNOWLEDGE_CHUNK_OVERLAP` | `64` | 仅纯文本路径的字符 overlap |
 
 ### 16.2 Embedding
 
@@ -1036,11 +1075,7 @@ curl http://localhost:8000/api/v2/heartbeat
 
 `RAG_TOP_K` 越大，模型可看到的上下文越多，但也更容易引入噪声和增加 token 成本。
 
-当前默认 `4` 适合轻量知识库。建议：
-
-- 小知识库：`3` 到 `4`。
-- 中等知识库：`4` 到 `6`。
-- 大知识库：保留 `topK=4`，优先调大 reranker 候选池或替换更强 reranker，而不是盲目增大 topK。
+当前聊天默认 `5`，离线评测默认 `4`，二者独立配置。调参时固定数据集和模型、记录实际 topK 与覆盖数量，再比较 RAGAS 与人工核对结果；不能仅凭增大上下文数量推断质量提高。
 
 ### 20.2 chunk size
 
@@ -1051,24 +1086,22 @@ chunkSize = 512
 chunkOverlap = 64
 ```
 
-适合 Markdown 知识文档。调整建议：
+管理员 Markdown/Marker 文档使用结构化路径，内置知识/JSON/txt 使用纯文本路径，二者对 chunkSize 的单位不同。调整时：
 
-- 如果检索结果经常缺上下文，可以增大 chunkSize 或 overlap。
+- 如果检索结果经常缺上下文，可以增大 chunkSize；只有纯文本路径可增加 overlap。
 - 如果检索结果过长、噪声多，可以减小 chunkSize。
-- 如果命中经常落在段落边界，可以适当增加 overlap。
+- 检查长表格行、代码行和原图片路径是否超过估算预算，结构完整不等于严格符合模型 token 上限。
 
 ### 20.3 向量权重和 BM25 权重
 
-当前：
+默认 RRF 按名次融合，不使用下面的权重。仅 `RAG_FUSION_STRATEGY=weighted` 使用：
 
 ```text
 vector = 0.65
 bm25 = 0.35
 ```
 
-如果用户表达更口语化、隐喻化，向量权重高一些通常更好。如果知识库里有明确流程词、政策词、资源名称，BM25 权重可以提高。
-
-建议通过 RAGAS 和人工样本测试后再改。
+这些权重目前定义在 `KnowledgeService` 中，不是环境变量。修改前应固定输入与评审配置进行比较，不预设某种配比优于另一种。
 
 ### 20.4 query 改写
 
@@ -1085,9 +1118,12 @@ bm25 = 0.35
 
 1. 数据库检索会 `findAll()` 加载全部 chunk。知识库变大后需要分页、倒排索引或专门检索服务。
 2. BM25 tokenizer 是轻量实现，没有专业中文分词和同义词扩展。
-3. 更换 embedding 模型或维度后，旧索引需要重建，才能重新参与向量检索。
-4. 当前 reranker 使用项目现有 `AiClient` 对候选打分，不是独立 cross-encoder；低延迟和稳定性要求更高时可替换为专用 reranker 模型。
+3. 更换知识库 embedding 模型或维度需重新生成向量；重建命令只重放已有向量，不执行模型迁移，也不清理孤立索引记录。
+4. BGE、Marker 和 Qwen2-VL 服务接口已接入；模型加载成本、硬件占用、实际延迟和效果需部署后验证。重排不可用时保留初排，DOCX 解析失败则无法入库。
 5. 内置知识刷新只比较 chunk 数，不比较内容 hash。内容变化但切块数量不变时可能不会刷新。
 6. 最终回答已提供引用编号和检索参考来源，但模型是否正确引用、证据是否真正支撑结论仍需离线评测及人工核对。
 7. 文件上传是同步处理，大文件或大量文档适合改成异步任务。
+8. 知识 Chroma 写入/删除与关系库事务不原子；部分知识网关请求没有独立等待上限。画像删除确认远端成功后才删数据库，仍需处理网络失败后的重试。
+9. 结构化切块使用 token 估算，超长单行和路径可能超预算；图片描述来自生成模型，应与原图人工核对。
+10. 本次交付验收覆盖编译、语法、配置格式及免模型检查，不包含真实服务联通、吞吐量、RAGAS 实测分数或提示注入对抗效果。
 

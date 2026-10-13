@@ -277,6 +277,8 @@ node --check src/main/resources/static/app.js
 
 `.tools` 不在 Git 中；没有附带 Maven 时使用系统 `mvn`。Linux/macOS 将 `mvn.cmd` 换成 `mvn`。GitHub Actions 的 [编译流程](.github/workflows/compile.yml) 还会对全部跟踪的 Python 文件做语法编译。这里的检查不启动应用或外部服务，也不表示 DeepSeek、文档解析、向量检索和通知投递已联通。
 
+2026-10-13 的最终检查结果、已知限制与改造提交索引见 [实施交付记录](docs/implementation-delivery.md)。
+
 ### 6. 启动验证
 
 应用启动后，访问：

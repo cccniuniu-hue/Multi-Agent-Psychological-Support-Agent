@@ -2,15 +2,17 @@
 
 本文件按 humanizer 的写作流程整理：先写出工作稿，再检查里面还像 AI 写作的地方，最后给出可直接使用的最终文案。最终文案可用于项目答辩、作品集介绍、README 扩写、路演讲稿或技术方案说明。
 
+2026-10-13 校对：公开项目名为 Multi-Agent-Psychological-Support-Agent，本文沿用 MindBridge 作为代码内部名称。以下实现说明不代表已完成真实模型效果、服务联通或性能评测。
+
 ## 初稿
 
 MindBridge 是一个面向校园心理健康场景的智能体系统。项目采用多 Agent 协作，把一轮学生输入拆成多个环节处理：先读取记忆，再判断意图，随后根据场景决定是否检索知识库、是否进行风险评估，最后由对应的回复 Agent 生成学生端回答。这种设计让系统在普通聊天、心理咨询和高风险求助之间保持清晰边界。
 
-在代码实现上，`AgentRuntimeService` 是多 Agent loop 的调度中心。它把 `MemoryAgent`、`SupervisorAgent`、`KnowledgeAgent`、`RiskGuardianAgent`、`CompanionAgent` 和 `CounselorAgent` 放入固定顺序，并通过 `AgentContext` 传递上下文状态。每个 Agent 通过 `supports(context)` 判断自己是否应该执行，通过 `act(context)` 完成本步任务，再返回 `AgentDecision`。整个 loop 最多执行 8 步，避免心理安全场景中出现不可控的无限循环。
+在代码实现上，`AgentRuntimeService` 是多 Agent loop 的调度中心。它注册六个职责 Agent，通过 `AgentContext` 传递状态；根据已完成步数和路由选择下一步，再用 `supports(context)` 校验前置条件。CHAT 为 3 步，CONSULT/RISK 为 5 步，只有回复 Agent 能结束循环；状态非法或超限会报错。
 
-项目中的多 Agent 协作不是简单的多模型堆叠。多个 Agent 可以共用同一个项目微调模型，但它们的 prompt、职责和工具权限不同。MemoryAgent 只负责准备记忆，SupervisorAgent 只负责路由，KnowledgeAgent 只在咨询和风险场景下检索知识，RiskGuardianAgent 只负责后台风险判断，最终回复则由 CompanionAgent 或 CounselorAgent 接手。
+多个 Agent 默认共享同一个 DeepSeek API 聊天客户端，各自的 prompt 和职责不同。MemoryAgent 准备记忆，SupervisorAgent 负责路由，KnowledgeAgent 在咨询和风险场景下检索知识，RiskGuardianAgent 做后台风险判断，最终回复由 CompanionAgent 或 CounselorAgent 接手。Embedding、图片描述和 BGE 重排分别配置。
 
-普通聊天会走轻量路径：MemoryAgent 读取上下文，SupervisorAgent 判断为 CHAT，随后 CompanionAgent 直接规划普通回复。咨询和风险输入会走更完整的路径：KnowledgeAgent 改写检索 query 并执行 RAG，RiskGuardianAgent 结合词库、模型 JSON 和关键词兜底做后台评估，CounselorAgent 再把记忆、知识库命中和风险守护结果组合成回复策略。高风险场景还会生成报告，写入 Excel，并按配置触发预警。
+普通聊天走 MemoryAgent、SupervisorAgent、CompanionAgent。咨询和风险输入先按原问题检索，仅复杂咨询证据不足时最多改写补检索一次；随后 RiskGuardianAgent 做后台评估，CounselorAgent 结合记忆、知识与风险结果生成回复策略。咨询和风险均保存报告，高风险在 Excel 成功后按配置触发预警。
 
 这套架构的价值在于让系统更可控、更透明、更适合校园心理支持场景。学生端看到的是一次自然的对话，后台则保留了每一步 agent 的运行轨迹、意图、风险等级、知识 query 和回复计划，方便管理员审计和排查。
 
@@ -47,19 +49,16 @@ MindBridge 选择多 Agent，并不是为了制造复杂度。它解决的是单
 
 一轮学生输入进入系统后，首先到达 `ChatController` 的 `/api/chat/stream` 接口。这个接口只允许学生账号发起对话，管理员账号只能查看后台记录，不能模拟学生聊天。随后 `ChatService` 开始准备本轮会话：修剪输入、做隐私脱敏、解析或创建会话，再调用 `AgentRuntimeService` 运行多 Agent loop。
 
-Agent loop 的固定顺序是：
+Agent loop 的两条固定路径是：
 
 ```text
-MemoryAgent
--> SupervisorAgent
--> KnowledgeAgent
--> RiskGuardianAgent
--> CompanionAgent / CounselorAgent
+MemoryAgent -> SupervisorAgent -> CompanionAgent
+MemoryAgent -> SupervisorAgent -> KnowledgeAgent -> RiskGuardianAgent -> CounselorAgent
 ```
 
-这条链路最多执行 8 步。这个限制写在 `AgentRuntimeService.MAX_STEPS` 中。它的意义很直接：系统不能在心理安全场景里无限自主循环，不能让 Agent 一直自我规划、自我调用。每一轮输入都必须在有限步内形成明确结果。
+链路最多执行 5 步，限制写在 `AgentRuntimeService.MAX_STEPS` 中。咨询/风险回复必须先完成知识处理与风险评估，不能用提前结束或换到普通回复路径绕过前置条件。
 
-调度方式也很克制。`AgentRuntimeService` 不让模型决定“下一个 Agent 是谁”，而是从固定列表里按顺序找第一个 `supports(context)` 返回 true 的 Agent。也就是说，下一步由代码状态决定，不由模型自由发挥决定。
+`AgentRuntimeService` 根据已完成步数和已确定意图选择唯一下一步，再校验该 Agent 的 `supports(context)`。缺失意图、状态不符或回复 Agent 未完成时会中止，不扫描其他 Agent 继续执行。
 
 每个 Agent 执行后会返回一个 `AgentDecision`，里面包含三类信息：
 
@@ -94,7 +93,7 @@ MemoryAgent 会优先读取 Redis 短期记忆。Redis 里按会话保存最近 
 
 除了聊天历史，它还会调用 `UserProfileMemoryService` 召回用户画像。用户画像不是把整段聊天都塞进 prompt，而是从对话中抽取相对稳定的信息，例如用户偏好、沟通方式、支持需求、个人背景和反复出现的状态模式。项目里还做了几层限制：不保存手机号、学号、证件号、真实姓名、详细地址，不保存诊断结论，也不保存风险等级。
 
-用户画像既写入关系库，方便审计和删除，也可以镜像到 Chroma 做语义召回。`profileBrief` 默认最多取 8 条与当前输入相关的画像记忆。这样后续 Agent 拿到的不是杂乱聊天记录，而是一段短而有用的记忆摘要。
+用户画像写入关系库，方便审计和删除。显式启用画像专用 Embedding 和密钥后才镜像到 Chroma，默认语义召回 Top6；未启用或无结果时回退最近 12 条当前用户画像，`profileBrief` 最多组织 8 条摘要。短期对话摘要约每 5 个完成轮次更新，失败保留旧摘要。
 
 MemoryAgent 最后会把历史消息和当前输入组合成 `modelHistory`，同时生成 `memoryBrief`。后面的 SupervisorAgent、KnowledgeAgent、CompanionAgent 和 CounselorAgent 都会使用这份上下文。
 
@@ -118,13 +117,13 @@ SupervisorAgent 使用 `IntentClassifier` 完成分类。IntentClassifier 的策
 
 `KnowledgeAgent` 不是每轮都执行。只有当意图已经路由，并且当前不是 CHAT 时，它才会接手。也就是说，普通闲聊、编程问题、课程问题不会被强制检索心理知识库。
 
-在咨询或风险场景中，KnowledgeAgent 先把学生输入改写成适合检索的中文 query。这个 query 不超过 40 个字，聚焦心理支持、校园求助流程、风险处理或情绪调节知识。比如用户说“我最近焦虑得睡不着，考试越来越近了”，检索 query 可能会变成“考试焦虑 失眠 情绪调节 校园求助”。
+在咨询或风险场景中，KnowledgeAgent 先保留原问题检索。只有不少于 40 字且包含多个分句的复杂 CONSULT、并且证据不足时，才尝试生成不超过 40 字的补充查询词；简短咨询和 RISK 不改写。改写失败、超时或输出无效时仍使用原问题。
 
-随后它调用 `KnowledgeService.retrieve(query, topK)`。KnowledgeService 的检索不是单一路线。它会优先使用 Chroma 向量检索，如果 Chroma 不可用或没有结果，就尝试基于本地 embedding 的相似度检索；同时还会使用 BM25 做关键词排序。项目把向量得分和 BM25 得分合并，默认权重是 0.65 和 0.35，再交给 reranker 做二阶段排序。
+`KnowledgeService.retrieve(query, topK)` 默认从 Chroma/本地余弦和 BM25 各召回最多 50 条，按 ID 去重并用 RRF 融合，再由独立 `BAAI/bge-reranker-v2-m3` HTTP 服务重排到 Top5。可选 weighted 策略才使用 0.65/0.35 权重；BGE 失败退回初排。
 
-检索到候选片段后，KnowledgeAgent 还会判断结果是否足够支持回答。如果结果不足，它会要求模型给出一个更具体的新 query，再检索一次。这个二次检索不是为了炫技，而是为了处理心理场景里常见的模糊表达。学生经常不会直接说“我需要危机安全计划”，而是说“我今晚有点撑不住”。系统需要把这种表达转成更适合知识库的查询。
+证据判断只接受明确的 `SUFFICIENT`。空结果、异常、三秒超时或模糊输出均按不足处理；复杂咨询补检索后交错合并并去重两批结果，再检查一次，不发起第三次检索。原问题保留在最终 query 中，证据不足会在回答中明确说明。
 
-KnowledgeService 还有一个上下文扩展细节：命中片段会补上前后相邻 chunk，减少切块边界导致的信息断裂。知识库默认 chunk size 是 512，overlap 是 64。最终传给 CounselorAgent 的不是原始文档全量内容，而是和当前问题相关的几段材料。
+KnowledgeService 对首条命中补上同来源的相邻 chunk。管理员 Markdown/Marker 文档按章节、段落和估算 token 预算切块，保留表格、代码与独立图片描述；内置知识和纯文本仍用默认 512 字符与 64 字符 overlap。最终只将本轮参考片段作为数据消息交给 CounselorAgent，系统规则与文档内容分开。
 
 ### RiskGuardianAgent：风险判断不能只靠模型口感
 
@@ -187,7 +186,7 @@ MemoryAgent 准备上下文。SupervisorAgent 判断为 CHAT，并直接把 `kno
 MemoryAgent -> SupervisorAgent -> KnowledgeAgent -> RiskGuardianAgent -> CounselorAgent
 ```
 
-SupervisorAgent 判断为 CONSULT。KnowledgeAgent 改写 query 并检索焦虑、睡眠、情绪调节、校园求助相关知识。RiskGuardianAgent 做后台评估。CounselorAgent 结合记忆、RAG 和评估结果生成支持式回复。因为这是咨询输入，系统会保存心理报告，但学生端不会看到风险等级和后台字段。
+SupervisorAgent 判断为 CONSULT。KnowledgeAgent 先用原问题检索，复杂且证据不足时才改写补检索。RiskGuardianAgent 做后台评估，CounselorAgent 结合记忆、RAG 和评估结果生成支持式回复。系统保存心理报告，学生端不展示风险等级和后台字段。
 
 高风险路径和咨询路径类似，但风险优先级更高。比如学生说：“我不想活了，今晚可能撑不住。”系统会先由高风险词库命中 RISK，再继续走知识检索、风险守护和心理支持回复。后台报告会标记 HIGH 风险。模型回复完成后，工具链会先写 Excel，写入成功后再向配置的收件人发送预警。
 
@@ -199,9 +198,9 @@ MindBridge 的记忆分成短期记忆和用户画像长期记忆。
 
 短期记忆解决“刚才聊到哪”的问题。`ShortTermMemoryService` 使用 Redis list 保存最近消息，key 以 `mindbridge:chat:short-memory:` 开头。每次保存用户或助手消息时，系统都会把消息追加到 Redis，并按 `historyLimit * 2` 截断，避免上下文无限增长。Redis 读失败或为空时，系统还能从 MySQL 会话消息恢复最近记录。
 
-长期记忆解决“这个学生有哪些稳定偏好和背景”的问题。`UserProfileMemoryService` 在每轮用户输入后尝试抽取候选记忆，只保留对后续对话稳定有帮助的信息。类型包括偏好、沟通方式、支持需求、个人背景和状态模式。候选记忆有置信度门槛，默认低于 0.55 不保存；单个用户最多保留 40 条，旧记录会被裁剪。
+长期记忆保存稳定偏好和背景。`UserProfileMemoryService` 每轮只检查触发条件，约十条未处理用户消息、风险变化、明确长期偏好或会话结束时才抽取；类型相同、归一化摘要相同的候选合并证据。默认置信度低于 0.55 不保存，单个用户最多 40 条；抽取进度落库，重复结束请求不重做已有输入。
 
-更重要的是，长期记忆不是黑箱。它写入关系库，可以在 `/api/profile/memory` 查看，也可以由用户删除。启用 Chroma 时，记忆会镜像到向量库，下一轮对话按当前输入语义召回。没有 Chroma 时，系统也会回退到最近记忆。
+画像可通过 `/api/profile/memory` 查看和删除，只访问当前账号所属记录。保存、展示和外发前均做规则脱敏；显式开启专用 Embedding 后才写向量库。Chroma 启用时删除需确认远端索引已清理，失败返回 503 并保留数据库记录供重试；关闭 Chroma 则仅删数据库，应先处理已有外部索引。
 
 这种设计让 Agent 之间共享的是“整理过的记忆”，不是一大堆原始聊天。CounselorAgent 拿到的 memoryBrief 可以帮助它避免重复提问，也可以让回复更贴近用户的表达方式和支持需求。
 
@@ -272,7 +271,7 @@ MindBridge 对学生端和后台做了明显区分。学生端不会看到风险
 
 ### 工程上的可扩展性
 
-如果后续要新增 Agent，项目已经留出了相对清楚的扩展方式。新增 Agent 只需要实现 `MindBridgeAgent`，定义自己的 `name()`、`supports(context)` 和 `act(context)`，再把它加入 `AgentRuntimeService` 的固定列表。
+新增 Agent 需要实现 `MindBridgeAgent`，定义 `name()`、`supports(context)` 和 `act(context)`，同时更新 `AgentRuntimeService` 的状态路由、步数限制和相关测试。仅加入注册列表不会自动进入执行路径，也不能绕过风险评估前置条件。
 
 例如可以增加一个 `ResourceAgent`，专门根据学校配置推荐心理中心、辅导员、学院联系方式或预约入口。也可以增加一个 `ReflectionAgent`，在不打断回复的情况下检查 CounselorAgent 的回复是否泄露后台标签、是否包含诊断、是否遗漏高风险安全提示。
 
@@ -302,7 +301,7 @@ MindBridge 对学生端和后台做了明显区分。学生端不会看到风险
 
 第三步，SupervisorAgent 调用 IntentClassifier。输入中有焦虑、心慌、睡不着、撑不住等心理求助信号。若没有明确自伤词，通常会进入 CONSULT；如果出现明确自伤或轻生表达，则进入 RISK。
 
-第四步，KnowledgeAgent 把输入改写成知识库 query，比如“考试焦虑 失眠 心慌 情绪调节 校园求助”。它检索内置心理知识库，拿到焦虑、睡眠、五感着陆、校园心理中心资源等片段。如果检索结果不足，它会换一个更具体的 query 再查一次。
+第四步，KnowledgeAgent 按原问题检索。示例输入不足复杂咨询长度阈值，不会自动改写；更长的多分句 CONSULT 且证据不足时，才最多补检索一次。是否命中相关资料以本轮检索结果为准，空白或不明确证据均视为不足。
 
 第五步，RiskGuardianAgent 评估后台风险。它会结合当前输入和最近上下文，输出 emotion、emotionScore、risk、confidence 和 summary。如果模型输出异常，关键词兜底会继续给出可用评估。
 
@@ -316,13 +315,13 @@ MindBridge 对学生端和后台做了明显区分。学生端不会看到风险
 
 如果要在答辩或展示里讲项目亮点，可以把重点放在下面几句话上。
 
-MindBridge 把校园心理健康对话拆成一个有限步多 Agent loop。每轮输入最多执行 8 步，调度由代码状态控制，不让模型无限自主调用。
+MindBridge 把校园心理健康对话拆成有限步多 Agent loop。CHAT 为 3 步，CONSULT/RISK 为 5 步，调度与前置条件由代码状态控制，异常时中止流程。
 
 系统区分 CHAT、CONSULT 和 RISK。普通学习、编程、校园事务不会被强行心理化；咨询和风险输入才进入 RAG、风险评估和报告链路。
 
 风险判断有硬规则兜底。明确高风险表达优先进入 RISK，模型 JSON 解析失败时还有关键词启发式判断，RISK 路由会被保护性提升为 HIGH。
 
-RAG 只在需要时参与。KnowledgeAgent 会改写 query、检索知识库、判断结果是否足够，并在不足时二次检索。KnowledgeService 同时使用向量检索、BM25、reranker 和相邻 chunk 扩展。
+RAG 只在 CONSULT/RISK 路径参与。原问题先检索，仅复杂咨询证据不足时最多补检索一次。KnowledgeService 使用默认 RRF 混合召回、独立 BGE 重排及首条相邻 chunk 扩展，最终回答附可核对的参考来源。
 
 记忆分层处理。Redis 保存短期会话上下文，MySQL 保存完整聊天记录，用户画像长期记忆可审计、可删除，并可通过 Chroma 做语义召回。
 
