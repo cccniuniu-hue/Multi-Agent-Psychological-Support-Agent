@@ -1,6 +1,8 @@
 # Multi-Agent-Psychological-Support-Agent
 
+基于 Java 17、Spring Boot 和 Spring AI 的校园心理支持多 Agent 项目。主应用通过 DeepSeek API 生成回复，知识库采用结构化文档入库、向量与 BM25 混合召回、RRF 融合和可选 BGE 重排，并保留来源、风险处理轨迹和分层记忆。
 
+## 已实现能力
 
 - 动态路由 RAG：先识别 `CHAT / CONSULT / RISK`，闲聊不查知识库，咨询与风险消息才进入检索增强。
 - SSE 流式输出：`/api/chat/stream` 返回 `text/event-stream`，适合前端做打字机效果。
@@ -8,10 +10,57 @@
 - 用户画像记忆：在会话结束、累计约十轮输入或重要变化时抽取稳定偏好、沟通方式和支持需求，合并重复画像与证据，MySQL 保存可审计记录；显式开启画像向量化后可用 Chroma 语义召回。
 - 数据闭环：咨询/风险消息写入数据库，高风险先写 Excel，再触发邮件或 HTTP MCP 预警。
 - Spring AI 模型接入：默认通过 DeepSeek API 提供聊天与生成能力，也可按需切到 `openai`。
-- 可替换知识库：默认本地轻量检索，可打开 Chroma 镜像和查询。
+- 文档知识库：支持 PDF、DOCX、Markdown 和 txt；Marker 解析与 Qwen2-VL 图片描述按需启用，保留章节、表格、代码和图片来源。
+- 混合检索：默认向量和 BM25 各取最多 50 条候选，RRF 融合后由独立 BGE HTTP 服务重排到 Top5；Chroma 和重排服务不可用时有本地降级。
 - 多 Agent loop：每轮输入由 MemoryAgent、SupervisorAgent、KnowledgeAgent、RiskGuardianAgent 和回复 Agent 协作完成
 
 默认聊天模型为 DeepSeek API 的 `deepseek-flash`。知识库和用户画像的 Embedding 服务独立配置；DeepSeek API Key 不会自动用作向量化密钥。
+
+## 架构与数据流
+
+```mermaid
+flowchart TD
+    Upload["管理员上传 PDF / DOCX / Markdown / txt"] --> Parse["Marker 可选 / PDFBox / UTF-8"]
+    Parse --> Structure["Markdown AST：章节、段落、表格、代码"]
+    Parse --> Vision["Qwen2-VL 可选：图片结构化描述"]
+    Vision --> Structure
+    Structure --> Chunks["结构化切块 + 独立 IMAGE 块"]
+    Bundled["内置知识 / JSON 文本"] --> Plain["文本自然边界切块 + overlap"]
+    Chunks --> DB["H2 / MySQL：知识主数据"]
+    Plain --> DB
+    DB --> Embed["知识库 Embedding：独立密钥，默认 512 维"]
+    Embed --> Index["Chroma v2 索引 / 数据库向量"]
+    Query["KnowledgeAgent：原问题，复杂咨询最多补检索一次"] --> Vector["Chroma 或本地余弦 Top50"]
+    Index --> Vector
+    Query --> BM25["数据库 BM25 Top50"]
+    DB --> BM25
+    Vector --> Fusion["RRF / weighted 融合与去重"]
+    BM25 --> Fusion
+    Fusion --> BGE["BGE HTTP 重排：最多 50 条 → Top5"]
+    BGE --> Guard["证据检查 + RiskGuardian 风险评估"]
+    Guard --> Reply["Counselor + DeepSeek：SSE 回复与参考来源"]
+```
+
+上图表示咨询与风险链路；普通聊天走下方 Agent 路由中的 CompanionAgent。Redis 缓存最近对话和阶段摘要，关系库保存完整聊天、画像及 trace；用户画像使用独立 collection，且仅在显式开启画像 Embedding 后参与向量召回。
+
+结构化文档按章节与段落切块，超长内容按估算 token 预算拆分，表格重复表头、代码保留围栏；内置知识和 JSON 文本仍使用原有字符长度与 overlap 路径。图片描述不会把原图 Base64 写入知识块。详细实现见 [RAG 技术说明](docs/rag-technical-guide.md)。
+
+## 降级与失败边界
+
+| 组件或条件 | 当前行为 |
+| --- | --- |
+| 知识库 Embedding 未配置或失败 | 知识文本仍入关系库，检索走 BM25；DeepSeek 聊天不提供 Embedding |
+| Chroma 关闭、失败或无结果 | 复用查询向量，在数据库中按相同模型和维度做余弦检索；无可用向量时只保留 BM25 |
+| BGE 关闭、超时或评分契约异常 | 返回融合后的初排 TopK，保留原始顺序；默认 TopK 为 5 |
+| Marker 关闭或失败 | PDF 回退 PDFBox；Markdown/txt 本地读取；DOCX 无本地解析降级，返回错误 |
+| 图片描述失败 | 跳过该图片描述，继续正文与其他图片；不下载 Markdown 中的外部图片链接 |
+| 改写或证据判断失败 | 改写回退原问题；空白、模糊或超时判定视为证据不足，最终回答附明确说明 |
+| Redis 无历史或不可用 | 最近聊天从关系库恢复；摘要更新失败保留已有摘要，没有旧摘要则不补写摘要 |
+| 画像向量化未启用或召回失败 | 回退当前用户的近期数据库画像；Chroma 开启时索引删除失败仍返回 503，保留记录供重试 |
+| Agent 路由状态非法或超过 5 步 | 中止当前流程，不能跳过风险评估并伪装为成功回复 |
+| DeepSeek 或关系库不可用 | 没有可用的聊天模型或主数据替代服务；按实际错误返回，不能把检索降级理解为全链路可用 |
+
+数据库是主数据来源，外部索引写入与数据库事务不是分布式事务。索引操作失败可能留下缺失或旧记录，恢复方式及重建限制见技术说明；不能据此宣称所有删除、刷新均已同步完成。
 
 ## 目录
 
@@ -149,6 +198,7 @@ Compose 包含以下服务；Marker、Qwen2-VL 和 BGE Reranker 使用独立 pro
 | Redis | `6379` | 短期会话记忆 |
 | Chroma | `8000` | 知识库和用户画像向量检索 |
 | Marker | `127.0.0.1:8001` | PDF/DOCX 转 Markdown，返回图片清单与内容 |
+| Qwen2-VL | `127.0.0.1:8002` | 可选 GPU 图片描述服务，与 DeepSeek 聊天及 Embedding 独立 |
 | BGE Reranker | `127.0.0.1:8003` | 对 query 与多条候选文本批量评分；服务异常时 Java 退回初排结果 |
 | Mailpit | `1025` / `8025` | SMTP 测试服务 / 管理页面 |
 
@@ -213,6 +263,19 @@ docker compose down
 | `MCP_EMAIL_MODE` | `log` | `log`、`smtp`、`http` 或 `mcp` |
 
 更多模型、MySQL、Chroma、SMTP 和 MCP 参数见本文档后续同名章节。不要将 API Key 或真实密码提交到代码仓库。
+
+### 静态验收
+
+无需 API Key 或模型服务即可执行代码验收。Windows PowerShell 在仓库根目录运行：
+
+```powershell
+& ./.tools/apache-maven-3.9.9/bin/mvn.cmd --batch-mode --no-transfer-progress '-Dmaven.repo.local=.m2/repository' -DskipTests compile
+python -m unittest discover -s eval -p 'test_ragas_eval.py' -v
+python eval/run-ragas-eval.py --input eval/examples/rag-eval-report.synthetic.json --validate-only
+node --check src/main/resources/static/app.js
+```
+
+`.tools` 不在 Git 中；没有附带 Maven 时使用系统 `mvn`。Linux/macOS 将 `mvn.cmd` 换成 `mvn`。GitHub Actions 的 [编译流程](.github/workflows/compile.yml) 还会对全部跟踪的 Python 文件做语法编译。这里的检查不启动应用或外部服务，也不表示 DeepSeek、文档解析、向量检索和通知投递已联通。
 
 ### 6. 启动验证
 
